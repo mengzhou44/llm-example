@@ -98,18 +98,18 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#212121] text-[#ececec] font-sans">
+    <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Sidebar */}
-      <aside className="w-60 flex-shrink-0 bg-[#171717] flex flex-col gap-5 p-5">
-        <h1 className="text-lg font-semibold text-white">AI Chat</h1>
+      <aside className="w-60 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col gap-5 p-5">
+        <h1 className="text-lg font-semibold text-gray-900">AI Chat</h1>
 
         <div className="flex flex-col gap-2">
-          <label className="text-[11px] uppercase tracking-widest text-[#888]">Template</label>
+          <label className="text-[11px] uppercase tracking-widest text-gray-400">Template</label>
           <select
             value={template}
             onChange={(e) => setTemplate(e.target.value)}
             disabled={streaming}
-            className="bg-[#2a2a2a] text-[#ececec] border border-[#3a3a3a] rounded-lg px-3 py-2 text-sm outline-none capitalize cursor-pointer disabled:opacity-50 disabled:cursor-default focus:border-[#555]"
+            className="bg-gray-50 text-gray-800 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none capitalize cursor-pointer disabled:opacity-50 disabled:cursor-default focus:border-gray-400"
           >
             {TEMPLATES.map((t) => (
               <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
@@ -120,7 +120,7 @@ export default function App() {
         <button
           onClick={clearChat}
           disabled={streaming}
-          className="mt-auto bg-[#2a2a2a] text-[#ececec] border border-[#3a3a3a] rounded-lg px-4 py-2.5 text-sm text-left hover:bg-[#333] transition-colors disabled:opacity-50 disabled:cursor-default"
+          className="mt-auto bg-gray-50 text-gray-700 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-left hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-default"
         >
           + New chat
         </button>
@@ -131,7 +131,7 @@ export default function App() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-[20%] py-8 flex flex-col gap-6">
           {messages.length === 0 && (
-            <p className="text-[#555] text-center mt-[20vh] text-[15px]">
+            <p className="text-gray-400 text-center mt-[20vh] text-[15px]">
               Send a message to get started.
             </p>
           )}
@@ -143,8 +143,8 @@ export default function App() {
               <span
                 className={`text-[15px] leading-relaxed whitespace-pre-wrap break-words ${
                   msg.role === "user"
-                    ? "bg-[#2f2f2f] rounded-[18px] rounded-br-[4px] px-4 py-3 max-w-[72%]"
-                    : "max-w-full"
+                    ? "bg-blue-500 text-white rounded-[18px] rounded-br-[4px] px-4 py-3 max-w-[72%]"
+                    : "text-gray-800 max-w-full"
                 }`}
               >
                 {msg.content}
@@ -160,7 +160,7 @@ export default function App() {
         {/* Input */}
         <form
           onSubmit={sendMessage}
-          className="flex items-end gap-2 px-[20%] py-4 border-t border-[#2a2a2a]"
+          className="flex items-end gap-2 px-[20%] py-4 border-t border-gray-200 bg-white"
         >
           <textarea
             rows={1}
@@ -171,16 +171,21 @@ export default function App() {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(e); }
             }}
             disabled={streaming}
-            className="flex-1 bg-[#2f2f2f] text-[#ececec] border border-[#3a3a3a] rounded-xl px-4 py-3 text-[15px] font-sans resize-none outline-none max-h-48 overflow-y-auto leading-relaxed disabled:opacity-50 focus:border-[#555]"
+            className="flex-1 bg-gray-50 text-gray-900 border border-gray-200 rounded-xl px-4 py-3 text-[15px] font-sans resize-none outline-none max-h-48 overflow-y-auto leading-relaxed disabled:opacity-50 focus:border-gray-400 placeholder-gray-400"
           />
           <button
             type="submit"
             disabled={!input.trim() || streaming}
-            className="w-10 h-10 rounded-[10px] bg-[#ececec] text-[#212121] text-lg flex items-center justify-center flex-shrink-0 hover:bg-white transition-colors disabled:opacity-35 disabled:cursor-default"
+            className="w-10 h-10 rounded-[10px] bg-blue-500 text-white text-lg flex items-center justify-center flex-shrink-0 hover:bg-blue-600 transition-colors disabled:opacity-35 disabled:cursor-default"
           >
             ↑
           </button>
         </form>
+
+        {/* Footer */}
+        <footer className="text-center text-xs text-gray-400 py-2 bg-white border-t border-gray-100">
+          Easy Express Solutions Inc. &copy; 2026
+        </footer>
       </main>
     </div>
   );

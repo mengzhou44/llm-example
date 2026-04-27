@@ -8,7 +8,7 @@
     width: 2px;
     height: 1em;
     vertical-align: text-bottom;
-    background: #ececec;
+    background: #374151;
     margin-left: 2px;
     animation: blink 0.7s steps(1) infinite;
   }
