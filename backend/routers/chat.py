@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from routers.knowledge import _cosine_sim, _get_embedding_model, kb_chunks, kb_documents
+
 router = APIRouter()
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -25,6 +27,23 @@ TEMPLATES: dict[str, str] = _prompts_config["templates"]
 
 sessions: dict[str, list[dict]] = {}
 session_locks: dict[str, asyncio.Lock] = {}
+
+KB_TOP_K = 3
+KB_MIN_SCORE = 0.2
+
+
+async def _search_kb(query: str) -> list[dict]:
+    if not kb_chunks:
+        return []
+    model = await _get_embedding_model()
+    loop = asyncio.get_running_loop()
+    query_emb = await loop.run_in_executor(None, lambda: model.encode([query])[0])
+    scored = sorted(
+        [(_cosine_sim(query_emb, c["embedding"]), c) for c in kb_chunks],
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    return [c for score, c in scored[:KB_TOP_K] if score >= KB_MIN_SCORE]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -76,6 +95,14 @@ async def chat_stream(request: StreamChatRequest):
     system_prompt = TEMPLATES.get(request.template)
     if system_prompt is None:
         raise HTTPException(status_code=400, detail=f"Unknown template: {request.template}")
+
+    kb_results = await _search_kb(request.message)
+    if kb_results:
+        context = "\n\n".join(
+            f"[From {kb_documents.get(c['doc_id'], {}).get('name', 'document')}]:\n{c['text']}"
+            for c in kb_results
+        )
+        system_prompt = f"{system_prompt}\n\nRelevant context from uploaded documents:\n\n{context}"
 
     lock = session_locks.setdefault(request.session_id, asyncio.Lock())
     async with lock:

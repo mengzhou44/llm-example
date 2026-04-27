@@ -173,7 +173,7 @@ export default function App() {
           <input
             type="file"
             ref={fileInputRef}
-            accept=".txt,.md"
+            accept=".txt,.md,.pdf,.docx"
             onChange={handleFileUpload}
             className="hidden"
           />

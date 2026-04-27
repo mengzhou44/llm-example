@@ -1,24 +1,38 @@
 import asyncio
+import io
 import os
 import uuid
 from datetime import datetime, timezone
 
 import numpy as np
+from docx import Document
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
 router = APIRouter()
 
+ALLOWED_EXTENSIONS = (".txt", ".md", ".pdf", ".docx")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(1 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 
 _embedding_model: SentenceTransformer | None = None
 _model_lock = asyncio.Lock()
 _kb_lock = asyncio.Lock()
 kb_documents: dict[str, dict] = {}
 kb_chunks: list[dict] = []
+
+
+def _extract_text(filename: str, content: bytes) -> str:
+    if filename.endswith(".pdf"):
+        reader = PdfReader(io.BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if filename.endswith(".docx"):
+        doc = Document(io.BytesIO(content))
+        return "\n".join(p.text for p in doc.paragraphs)
+    return content.decode("utf-8")
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -68,20 +82,20 @@ class SearchResult(BaseModel):
 
 @router.post("/knowledge/upload", response_model=DocumentResponse)
 async def upload_document(file: UploadFile = File(...)):
-    if not (file.filename or "").endswith((".txt", ".md")):
-        raise HTTPException(status_code=400, detail="Only .txt and .md files are supported")
+    if not (file.filename or "").endswith(ALLOWED_EXTENSIONS):
+        raise HTTPException(status_code=400, detail="Only .txt, .md, .pdf, and .docx files are supported")
 
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="File exceeds 1 MB limit")
+        raise HTTPException(status_code=413, detail="File exceeds 10 MB limit")
 
     try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded text")
+        text = _extract_text(file.filename, content)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not extract text from file")
 
     if not text.strip():
-        raise HTTPException(status_code=400, detail="File is empty")
+        raise HTTPException(status_code=400, detail="File is empty or contains no extractable text")
 
     chunks = _chunk_text(text)
     model = await _get_embedding_model()

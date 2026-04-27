@@ -24,7 +24,7 @@ cd llm-example
 ```bash
 cd backend
 cp .env.example .env          # then open .env and add your ANTHROPIC_API_KEY
-pip3 install -r requirements.txt
+pip3.11 install -r requirements.txt
 ```
 
 ### 3. Set up the frontend
