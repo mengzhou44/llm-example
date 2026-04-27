@@ -42,11 +42,11 @@ Open two terminals:
 # Terminal 1 — backend (http://localhost:4000)
 bash backend/start.sh
 
-# Terminal 2 — frontend (http://localhost:5173)
+# Terminal 2 — frontend (http://localhost:3000)
 cd frontend && npm run dev
 ```
 
-Then open **http://localhost:5173** in your browser.
+Then open **http://localhost:3000** in your browser.
 
 ## Features
 
