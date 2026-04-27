@@ -1,6 +1,6 @@
 # llm-example
 
-A ChatGPT-style AI chat app: FastAPI backend with streaming SSE, React frontend.
+A ChatGPT-style AI chat app: FastAPI backend with streaming SSE, React + Tailwind frontend.
 
 
 ## GitHub operations
@@ -9,7 +9,7 @@ Always use the GitHub MCP server tools (e.g. mcp__github__create_pull_request, m
 ## Stack
 
 - **Backend**: Python 3 + FastAPI + Anthropic SDK (Claude Haiku) + python-dotenv + PyYAML
-- **Frontend**: React 18 + Vite
+- **Frontend**: React 18 + Vite + Tailwind CSS v3
 
 ## Setup
 
@@ -26,16 +26,16 @@ cd frontend && npm install
 
 ```bash
 # Backend (port 4000)
-bash backend/scripts/start.sh
+bash backend/start.sh
 
-# Frontend (port 5173)
+# Frontend (port 3000)
 cd frontend && npm run dev
 ```
 
 ## API
 
 ### POST /chat
-Simple single-turn chat (no history).
+Simple single-turn chat, no history.
 ```json
 // Request
 { "message": "Hello!" }
@@ -53,38 +53,50 @@ data: {"delta": "Hello"}
 data: [DONE]
 ```
 
-Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `backend/prompts.yaml`.
+Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `backend/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/App.jsx`.
 
-**Session management**: conversation history is stored in memory keyed by `session_id`. The frontend generates a UUID and persists it in `localStorage` so the session survives page reloads. Oldest messages are dropped when the history exceeds the token budget (~7168 tokens).
+**Session management**: conversation history is stored in memory keyed by `session_id`. The frontend generates a UUID on first load and persists it in `localStorage` so the session survives page reloads. Oldest messages are silently dropped when history exceeds the ~7168 token budget.
 
 **Concurrency**: each session is protected by an `asyncio.Lock` to prevent concurrent requests from corrupting history order.
 
-## Frontend (PL-12)
+## Frontend
 
-React 18 + Vite single-page app at `http://localhost:5173`.
+React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 
-- Streams token-by-token using `fetch` + `ReadableStream` (SSE over POST)
-- Template selector in sidebar (maps to `backend/prompts.yaml` keys)
-- "New chat" button resets the session and clears history
-- Auto-scrolls to latest message; blinking cursor while streaming
-- Enter to send, Shift+Enter for newline
+- Light mode theme (white/gray-50 background, blue user bubbles)
+- Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
+- Sidebar: template dropdown + "New chat" button
+- Footer: "Easy Express Solutions Inc. © 2026"
+- Enter to send, Shift+Enter for newline; blinking cursor while streaming
+
+## MCP servers
+
+Configured in `.mcp.json` (gitignored):
+- **github** — `@modelcontextprotocol/server-github` via npx, uses `GITHUB_PERSONAL_ACCESS_TOKEN`
+- **jira** — `mcp-atlassian` via uvx, connected to `mengzhou.atlassian.net`
+
+Restart Claude Code after editing `.mcp.json` for changes to take effect.
 
 ## Project structure
 
 ```
 backend/
   main.py            # FastAPI app: /chat and /chat/stream endpoints
-  prompts.yaml       # System prompt templates (add new keys here to extend)
+  prompts.yaml       # System prompt templates
   requirements.txt   # Python dependencies
-  scripts/start.sh   # Start the backend server
+  start.sh           # Start the backend server (port 4000)
   .env               # API keys (gitignored)
   .env.example       # Template for .env
 frontend/
   src/
     App.jsx          # Chat UI: messages, template selector, streaming, session
-    App.css          # Dark ChatGPT-style theme
+    App.css          # Tailwind directives + cursor-blink keyframe
     main.jsx         # React entry point
   index.html
   package.json
   vite.config.js
+  tailwind.config.js
+  postcss.config.js
+.mcp.json            # MCP server config (gitignored — contains secrets)
+README.md            # Getting started guide
 ```
