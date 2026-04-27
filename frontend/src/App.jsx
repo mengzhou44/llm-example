@@ -17,12 +17,23 @@ export default function App() {
   const [input, setInput] = useState("");
   const [template, setTemplate] = useState("helpful_assistant");
   const [streaming, setStreaming] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [kbError, setKbError] = useState("");
   const bottomRef = useRef(null);
   const sessionId = useRef(getSessionId());
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    fetch(`${BACKEND}/knowledge/documents`)
+      .then((r) => r.json())
+      .then(setDocuments)
+      .catch(() => {});
+  }, []);
 
   async function sendMessage(e) {
     e.preventDefault();
@@ -97,6 +108,45 @@ export default function App() {
     setMessages([]);
   }
 
+  async function handleFileUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploading(true);
+    setKbError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${BACKEND}/knowledge/upload`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const err = await res.json();
+        setKbError(err.detail || "Upload failed");
+        return;
+      }
+      const doc = await res.json();
+      setDocuments((prev) => [...prev, doc]);
+    } catch {
+      setKbError("Network error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function deleteDocument(docId) {
+    setKbError("");
+    try {
+      const res = await fetch(`${BACKEND}/knowledge/documents/${docId}`, { method: "DELETE" });
+      if (res.ok) {
+        setDocuments((prev) => prev.filter((d) => d.id !== docId));
+      } else {
+        const err = await res.json();
+        setKbError(err.detail || "Delete failed");
+      }
+    } catch {
+      setKbError("Network error");
+    }
+  }
+
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Sidebar */}
@@ -115,6 +165,51 @@ export default function App() {
               <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-[11px] uppercase tracking-widest text-gray-400">Knowledge Base</label>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".txt,.md"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="bg-gray-50 text-gray-700 border border-gray-200 rounded-lg px-3 py-2 text-sm text-left hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-default"
+          >
+            {uploading ? "Uploading…" : "+ Upload document"}
+          </button>
+
+          {kbError && <p className="text-xs text-red-500">{kbError}</p>}
+
+          {documents.length > 0 ? (
+            <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5"
+                >
+                  <span className="flex-1 truncate text-xs text-gray-700" title={doc.name}>
+                    {doc.name}
+                  </span>
+                  <button
+                    onClick={() => deleteDocument(doc.id)}
+                    className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 text-sm leading-none"
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">No documents uploaded</p>
+          )}
         </div>
 
         <button
