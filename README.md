@@ -40,7 +40,7 @@ Open two terminals:
 
 ```bash
 # Terminal 1 — backend (http://localhost:4000)
-bash backend/scripts/start.sh
+bash backend/start.sh
 
 # Terminal 2 — frontend (http://localhost:5173)
 cd frontend && npm run dev
