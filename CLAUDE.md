@@ -167,7 +167,7 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
 - **Markdown rendering**: assistant responses are rendered via `react-markdown` + `remark-gfm` — supports code blocks, lists, bold/italic, tables, blockquotes. User messages remain plain text. Styles live in `.markdown-body` in `App.css`.
 - Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
-- Tool call indicator (italic `↳ Fetching…` line) shown in assistant bubble when a tool is executing
+- Tool call indicator (italic `↳ Fetching…` / `↳ Updating…` line) shown in assistant bubble when a tool is executing
 - Sidebar: Chat/Analyzer mode toggle, template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - **Issue Analyzer mode**: paste raw ticket text or type a ticket ID (e.g. "analyze ticket 1001"); displays a structured result card with Summary, Root Cause, and Suggestion sections; shows a Ticket # header when an ID was resolved automatically
 - Footer: "Easy Express Solutions Inc. © 2026"
