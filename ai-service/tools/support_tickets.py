@@ -44,7 +44,7 @@ async def list_support_tickets(status: str | None = None) -> str:
         params = {"status": status} if status else {}
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                "http://localhost:5000/mock/tickets", params=params, timeout=5.0
+                "http://localhost:5001/mock/tickets", params=params, timeout=5.0
             )
             resp.raise_for_status()
             tickets = resp.json()
@@ -65,7 +65,7 @@ async def fetch_support_ticket(ticket_id: str) -> str:
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"http://localhost:5000/mock/tickets/{ticket_id}", timeout=5.0
+                f"http://localhost:5001/mock/tickets/{ticket_id}", timeout=5.0
             )
             if resp.status_code == 404:
                 return f"Ticket {ticket_id} was not found in the support system."
