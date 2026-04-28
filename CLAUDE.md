@@ -44,14 +44,16 @@ Simple single-turn chat, no history.
 ```
 
 ### POST /chat/stream
-Streaming SSE endpoint with multi-turn session history, prompt templates, and automatic RAG context injection.
+Streaming SSE endpoint with multi-turn session history, prompt templates, intelligent RAG routing, and source transparency.
 ```json
 // Request
 { "message": "Hello!", "session_id": "abc123", "template": "helpful_assistant" }
-// SSE stream
+// SSE stream — first event carries routing decision, then token deltas
+data: {"source": "both"}
 data: {"delta": "Hello"}
 data: [DONE]
 ```
+`source` values: `"both"` (KB context injected + AI general knowledge), `"general_ai"` (no KB retrieval).
 
 Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `backend/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/App.jsx`.
 
@@ -59,7 +61,7 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 
 **Concurrency**: each session is protected by an `asyncio.Lock` to prevent concurrent requests from corrupting history order.
 
-**RAG**: on each chat message, the top-3 most relevant knowledge base chunks (cosine similarity ≥ 0.2) are injected into the system prompt automatically. If the KB is empty, chat works as normal.
+**RAG + intelligent routing**: before retrieval, a fast YES/NO classifier call (same Claude model, `max_tokens=5`) decides whether the query warrants a KB lookup. Personal/document-specific questions retrieve from the KB; general questions skip retrieval entirely. If KB is empty the classifier is never called. Falls back to using KB on classifier failure. The routing decision is returned as the first SSE event `{"source": "both"|"general_ai"}` and displayed as a pill badge in the UI.
 
 ### POST /knowledge/upload
 Upload a document (.txt, .md, .pdf, .docx — max 10 MB). Text is extracted, split into 500-char chunks with 50-char overlap, and embedded via `sentence-transformers` (`all-MiniLM-L6-v2`). Returns document metadata.
@@ -101,6 +103,7 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 
 - Light mode theme (white/gray-50 background, blue user bubbles)
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
+- Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
 - Sidebar: template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - Footer: "Easy Express Solutions Inc. © 2026"
 - Enter to send, Shift+Enter for newline; blinking cursor while streaming

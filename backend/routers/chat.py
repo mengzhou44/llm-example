@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from routers.knowledge import _cosine_sim, _get_embedding_model, kb_chunks, kb_documents
+from routers.knowledge import _cosine_sim, _get_embedding_model, _kb_lock, kb_chunks, kb_documents
 
 router = APIRouter()
 
@@ -30,6 +30,44 @@ session_locks: dict[str, asyncio.Lock] = {}
 
 KB_TOP_K = int(os.getenv("KB_TOP_K", "3"))
 KB_MIN_SCORE = float(os.getenv("KB_MIN_SCORE", "0.35"))
+
+
+async def _classify_query(message: str, history: list[dict]) -> bool:
+    """Return True if the query warrants KB retrieval; defaults to True on failure."""
+    async with _kb_lock:
+        doc_names = [doc["name"] for doc in kb_documents.values()]
+    doc_list = ", ".join(doc_names) if doc_names else "none"
+
+    recent = history[:-1][-4:]
+    history_text = (
+        "\n".join(f"{m['role'].upper()}: {m['content'][:200]}" for m in recent)
+        if recent
+        else "None"
+    )
+
+    system = (
+        "You are a query router. Decide if the user's question needs a knowledge base lookup.\n"
+        "Reply with exactly one word: YES or NO.\n"
+        "Say YES if the question is about personal information, uploaded documents, or topics "
+        "likely covered in the available documents.\n"
+        "Say NO if the question is general knowledge that doesn't require personal context."
+    )
+    user_content = (
+        f"Available documents: {doc_list}\n"
+        f"Recent conversation:\n{history_text}\n"
+        f"Current question: {message}"
+    )
+
+    try:
+        result = await client.messages.create(
+            model=MODEL,
+            max_tokens=5,
+            system=system,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        return result.content[0].text.strip().upper().startswith("Y")
+    except Exception:
+        return True
 
 
 async def _search_kb(query: str, history: list[dict] | None = None) -> list[dict]:
@@ -120,7 +158,10 @@ async def chat_stream(request: StreamChatRequest):
 
         snapshot = list(history)
 
-    kb_results = await _search_kb(request.message, history=snapshot)
+    use_kb = await _classify_query(request.message, snapshot) if kb_chunks else False
+    kb_results = await _search_kb(request.message, history=snapshot) if use_kb else []
+    source = "both" if kb_results else "general_ai"
+
     if kb_results:
         excerpts = "\n\n".join(
             f"[Source: {kb_documents.get(c['doc_id'], {}).get('name', 'document')} | relevance: {c['score']:.2f}]\n{c['text']}"
@@ -137,14 +178,15 @@ async def chat_stream(request: StreamChatRequest):
         )
 
     return StreamingResponse(
-        _stream_response(request.session_id, system_prompt, snapshot),
+        _stream_response(request.session_id, system_prompt, snapshot, source),
         media_type="text/event-stream",
     )
 
 
 async def _stream_response(
-    session_id: str, system_prompt: str, messages: list[dict]
+    session_id: str, system_prompt: str, messages: list[dict], source: str
 ) -> AsyncIterator[str]:
+    yield f"data: {json.dumps({'source': source})}\n\n"
     accumulated = []
 
     async with client.messages.stream(
