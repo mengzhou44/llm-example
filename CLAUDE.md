@@ -26,7 +26,7 @@ Always use the GitHub MCP server tools (e.g. mcp__github__create_pull_request, m
 
 - **Gateway**: Java 21 + Spring Boot 3.2 + WebClient (spring-boot-starter-webflux)
 - **AI service**: Python 3.11 + FastAPI + Anthropic SDK (Claude Haiku) + httpx + sentence-transformers + python-dotenv + PyYAML
-- **Frontend**: React 18 + Vite + Tailwind CSS v3
+- **Frontend**: React 18 + Vite + Tailwind CSS v3 + react-markdown + remark-gfm
 
 ## Setup
 
@@ -144,11 +144,13 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 
 - Light mode theme (white/gray-50 background, blue user bubbles)
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
+- **Markdown rendering**: assistant responses are rendered via `react-markdown` + `remark-gfm` — supports code blocks, lists, bold/italic, tables, blockquotes. User messages remain plain text. Styles live in `.markdown-body` in `App.css`.
 - Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
 - Tool call indicator (italic `↳ Fetching…` line) shown in assistant bubble when a tool is executing
 - Sidebar: template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - Footer: "Easy Express Solutions Inc. © 2026"
 - Enter to send, Shift+Enter for newline; blinking cursor while streaming
+- Auto-resizing textarea: grows up to 192px as the user types, resets to one row on send
 
 ## MCP servers
 
@@ -193,7 +195,7 @@ backend/
 frontend/
   src/
     App.jsx            # Chat UI + Knowledge Base sidebar section
-    App.css            # Tailwind directives + cursor-blink keyframe
+    App.css            # Tailwind directives + cursor-blink keyframe + .markdown-body prose styles
     main.jsx           # React entry point
   index.html
   package.json
