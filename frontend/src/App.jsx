@@ -399,13 +399,13 @@ export default function App() {
           <div className="flex-1 overflow-y-auto px-[20%] py-8 flex flex-col gap-6">
             <div className="flex flex-col gap-1">
               <h2 className="text-[15px] font-semibold text-gray-900">Issue Analyzer</h2>
-              <p className="text-[13px] text-gray-400">Paste a ticket description to get a structured AI analysis.</p>
+              <p className="text-[13px] text-gray-400">Paste a ticket description or enter a ticket ID (e.g. "analyze ticket 1001") to get a structured AI analysis.</p>
             </div>
 
             <form onSubmit={analyzeIssue} className="flex flex-col gap-3">
               <textarea
                 rows={6}
-                placeholder="Paste ticket description here…"
+                placeholder="Paste ticket description, or type e.g. 'analyze ticket 1001'…"
                 value={analyzeInput}
                 onChange={(e) => setAnalyzeInput(e.target.value)}
                 disabled={analyzing}
@@ -426,6 +426,12 @@ export default function App() {
 
             {analyzeResult && (
               <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                {analyzeResult.ticket_id && (
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-widest text-gray-400">Ticket</span>
+                    <span className="text-[12px] font-medium text-gray-600">#{analyzeResult.ticket_id}</span>
+                  </div>
+                )}
                 {[
                   { label: "Summary", value: analyzeResult.summary },
                   { label: "Root Cause", value: analyzeResult.root_cause },
