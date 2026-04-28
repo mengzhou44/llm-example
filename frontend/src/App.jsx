@@ -14,6 +14,9 @@ function getSessionId() {
 
 function formatToolCall(tc) {
   if (tc.name === "get_support_ticket") return `Fetching support ticket #${tc.input.ticket_id}…`;
+  if (tc.name === "list_support_tickets") {
+    return tc.input.status ? `Listing ${tc.input.status.toLowerCase()} tickets…` : "Listing all tickets…";
+  }
   return `Calling ${tc.name}…`;
 }
 

@@ -51,6 +51,14 @@ _TICKETS = {
 }
 
 
+@router.get("/tickets")
+async def list_tickets(status: str | None = None):
+    tickets = list(_TICKETS.values())
+    if status:
+        tickets = [t for t in tickets if t["status"].lower() == status.lower()]
+    return tickets
+
+
 @router.get("/tickets/{ticket_id}")
 async def get_ticket(ticket_id: str):
     ticket = _TICKETS.get(ticket_id)
