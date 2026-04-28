@@ -28,13 +28,19 @@ TEMPLATES: dict[str, str] = _prompts_config["templates"]
 sessions: dict[str, list[dict]] = {}
 session_locks: dict[str, asyncio.Lock] = {}
 
-KB_TOP_K = 3
-KB_MIN_SCORE = 0.2
+KB_TOP_K = int(os.getenv("KB_TOP_K", "3"))
+KB_MIN_SCORE = float(os.getenv("KB_MIN_SCORE", "0.35"))
 
 
-async def _search_kb(query: str) -> list[dict]:
+async def _search_kb(query: str, history: list[dict] | None = None) -> list[dict]:
     if not kb_chunks:
         return []
+    # Enrich the query with recent prior user messages so follow-up questions
+    # ("tell me more", "elaborate on that") still retrieve the right chunks.
+    if history:
+        prior_user = [m["content"] for m in history[:-1] if m["role"] == "user"][-2:]
+        if prior_user:
+            query = " ".join(prior_user) + " " + query
     model = await _get_embedding_model()
     loop = asyncio.get_running_loop()
     query_emb = await loop.run_in_executor(None, lambda: model.encode([query])[0])
@@ -43,7 +49,11 @@ async def _search_kb(query: str) -> list[dict]:
         key=lambda x: x[0],
         reverse=True,
     )
-    return [c for score, c in scored[:KB_TOP_K] if score >= KB_MIN_SCORE]
+    return [
+        {"score": round(score, 3), "doc_id": c["doc_id"], "text": c["text"]}
+        for score, c in scored[:KB_TOP_K]
+        if score >= KB_MIN_SCORE
+    ]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -96,14 +106,6 @@ async def chat_stream(request: StreamChatRequest):
     if system_prompt is None:
         raise HTTPException(status_code=400, detail=f"Unknown template: {request.template}")
 
-    kb_results = await _search_kb(request.message)
-    if kb_results:
-        context = "\n\n".join(
-            f"[From {kb_documents.get(c['doc_id'], {}).get('name', 'document')}]:\n{c['text']}"
-            for c in kb_results
-        )
-        system_prompt = f"{system_prompt}\n\nRelevant context from uploaded documents:\n\n{context}"
-
     lock = session_locks.setdefault(request.session_id, asyncio.Lock())
     async with lock:
         history = sessions.setdefault(request.session_id, [])
@@ -117,6 +119,22 @@ async def chat_stream(request: StreamChatRequest):
             raise HTTPException(status_code=400, detail="Message too long")
 
         snapshot = list(history)
+
+    kb_results = await _search_kb(request.message, history=snapshot)
+    if kb_results:
+        excerpts = "\n\n".join(
+            f"[Source: {kb_documents.get(c['doc_id'], {}).get('name', 'document')} | relevance: {c['score']:.2f}]\n{c['text']}"
+            for c in kb_results
+        )
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            "<knowledge_base_context>\n"
+            "Use the following excerpts to answer the user's question. "
+            "Cite the source document by name when drawing from it. "
+            "If the context does not fully address the question, acknowledge what is and isn't covered.\n\n"
+            f"{excerpts}\n"
+            "</knowledge_base_context>"
+        )
 
     return StreamingResponse(
         _stream_response(request.session_id, system_prompt, snapshot),

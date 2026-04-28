@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -17,6 +18,9 @@ ALLOWED_EXTENSIONS = (".txt", ".md", ".pdf", ".docx")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+
+if CHUNK_OVERLAP >= CHUNK_SIZE:
+    raise ValueError(f"CHUNK_OVERLAP ({CHUNK_OVERLAP}) must be less than CHUNK_SIZE ({CHUNK_SIZE})")
 
 _embedding_model: SentenceTransformer | None = None
 _model_lock = asyncio.Lock()
@@ -36,11 +40,38 @@ def _extract_text(filename: str, content: bytes) -> str:
 
 
 def _chunk_text(text: str) -> list[str]:
-    chunks = []
-    start = 0
-    while start < len(text):
-        chunks.append(text[start : start + CHUNK_SIZE])
-        start += CHUNK_SIZE - CHUNK_OVERLAP
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+    if not sentences:
+        return []
+
+    # Any sentence longer than CHUNK_SIZE gets character-split first
+    normalized: list[str] = []
+    for s in sentences:
+        if len(s) <= CHUNK_SIZE:
+            normalized.append(s)
+        else:
+            for i in range(0, len(s), CHUNK_SIZE - CHUNK_OVERLAP):
+                normalized.append(s[i : i + CHUNK_SIZE])
+
+    chunks: list[str] = []
+    current: list[str] = []
+
+    for sentence in normalized:
+        if current and len(" ".join(current) + " " + sentence) > CHUNK_SIZE:
+            chunks.append(" ".join(current))
+            # Carry forward tail sentences up to CHUNK_OVERLAP chars as overlap
+            overlap: list[str] = []
+            for s in reversed(current):
+                trial = " ".join([s] + overlap)
+                if len(trial) > CHUNK_OVERLAP:
+                    break
+                overlap.insert(0, s)
+            current = overlap
+        current.append(sentence)
+
+    if current:
+        chunks.append(" ".join(current))
+
     return [c for c in chunks if c.strip()]
 
 
