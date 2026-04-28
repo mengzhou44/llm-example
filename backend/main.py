@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from routers import chat, knowledge  # noqa: E402 — must come after load_dotenv
+from routers import chat, knowledge, mock_tickets  # noqa: E402 — must come after load_dotenv
 
 app = FastAPI()
 app.add_middleware(
@@ -16,3 +16,4 @@ app.add_middleware(
 
 app.include_router(chat.router)
 app.include_router(knowledge.router)
+app.include_router(mock_tickets.router)

@@ -12,6 +12,14 @@ function getSessionId() {
   return id;
 }
 
+function formatToolCall(tc) {
+  if (tc.name === "get_support_ticket") return `Fetching support ticket #${tc.input.ticket_id}…`;
+  if (tc.name === "list_support_tickets") {
+    return tc.input.status ? `Listing ${tc.input.status.toLowerCase()} tickets…` : "Listing all tickets…";
+  }
+  return `Calling ${tc.name}…`;
+}
+
 export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -85,6 +93,16 @@ export default function App() {
             setMessages((prev) => {
               const next = [...prev];
               next[next.length - 1] = { ...next[next.length - 1], source: data.source };
+              return next;
+            });
+          } else if (data.tool_call) {
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              next[next.length - 1] = {
+                ...last,
+                toolCalls: [...(last.toolCalls || []), data.tool_call],
+              };
               return next;
             });
           } else if (data.delta) {
@@ -244,6 +262,11 @@ export default function App() {
               key={i}
               className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
+              {msg.role === "assistant" && msg.toolCalls?.map((tc, j) => (
+                <span key={j} className="text-[12px] text-gray-400 italic">
+                  ↳ {formatToolCall(tc)}
+                </span>
+              ))}
               <span
                 className={`text-[15px] leading-relaxed whitespace-pre-wrap break-words ${
                   msg.role === "user"
