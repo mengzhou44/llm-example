@@ -1,6 +1,6 @@
 # llm-example
 
-A ChatGPT-style AI chat app with RAG (knowledge base): Spring Boot gateway + FastAPI AI service ai-service with streaming SSE, React + Tailwind frontend.
+A ChatGPT-style AI chat app with RAG (knowledge base): Spring Boot gateway + FastAPI AI service with streaming SSE, React + Tailwind frontend.
 
 ## Architecture
 
@@ -90,7 +90,7 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 
 **RAG + intelligent routing**: before retrieval, a fast YES/NO classifier call (same Claude model, `max_tokens=5`) decides whether the query warrants a KB lookup. Personal/document-specific questions retrieve from the KB; general questions skip retrieval entirely. If KB is empty the classifier is never called. Falls back to using KB on classifier failure. The routing decision is returned as the first SSE event `{"source": "both"|"general_ai"}` and displayed as a pill badge in the UI.
 
-**AI agent tool use**: Claude is given a set of tools on every `/chat/stream` call. If it decides to use a tool (`stop_reason == "tool_use"`), the ai-service executes the tool, feeds the result back, and streams the final answer. A `{"tool_call": {"name": "...", "input": {...}}}` SSE event is emitted before each execution so the UI can show a progress indicator. Tool-use turns are stored in session history so follow-up questions have full context.
+**AI agent tool use**: Claude is given a set of tools on every `/chat/stream` call. If it decides to use a tool (`stop_reason == "tool_use"`), the AI service executes the tool, feeds the result back, and streams the final answer. A `{"tool_call": {"name": "...", "input": {...}}}` SSE event is emitted before each execution so the UI can show a progress indicator. Tool-use turns are stored in session history so follow-up questions have full context.
 
 Available tools:
 - `get_support_ticket` — fetch a single support ticket by ID
