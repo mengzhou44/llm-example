@@ -95,6 +95,7 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 Available tools:
 - `get_support_ticket` — fetch a single support ticket by ID
 - `list_support_tickets` — list tickets, optionally filtered by status (`Open`, `In Progress`, `Resolved`)
+- `update_ticket_status` — update ticket status (and optional resolution note); valid statuses: `Open`, `In Progress`, `Resolved`
 
 Tool implementations live in `ai-service/tools/`. Adding a new tool requires: (1) a definition + implementation in `ai-service/tools/`, (2) registering it in `ai-service/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
 
@@ -103,6 +104,15 @@ List all mock support tickets. Accepts optional `?status=Open|In Progress|Resolv
 
 ### GET /mock/tickets/{ticket_id}
 Fetch a single mock support ticket by numeric ID (1001–1005).
+
+### POST /mock/tickets/{ticket_id}/update
+Update a mock ticket's status and optional resolution note.
+```json
+// Request
+{ "status": "Resolved", "resolution": "Fixed in v2.4.0" }
+// Response — full updated ticket object
+```
+Valid statuses: `Open`, `In Progress`, `Resolved`. Changes are in-memory only (reset on restart).
 
 ### POST /analyze/issue
 Analyze a support ticket and return structured AI insights.
@@ -157,7 +167,7 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
 - **Markdown rendering**: assistant responses are rendered via `react-markdown` + `remark-gfm` — supports code blocks, lists, bold/italic, tables, blockquotes. User messages remain plain text. Styles live in `.markdown-body` in `App.css`.
 - Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
-- Tool call indicator (italic `↳ Fetching…` line) shown in assistant bubble when a tool is executing
+- Tool call indicator (italic `↳ Fetching…` / `↳ Updating…` line) shown in assistant bubble when a tool is executing
 - Sidebar: Chat/Analyzer mode toggle, template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - **Issue Analyzer mode**: paste raw ticket text or type a ticket ID (e.g. "analyze ticket 1001"); displays a structured result card with Summary, Root Cause, and Suggestion sections; shows a Ticket # header when an ID was resolved automatically
 - Footer: "Easy Express Solutions Inc. © 2026"

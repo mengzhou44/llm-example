@@ -20,6 +20,7 @@ function formatToolCall(tc) {
   if (tc.name === "list_support_tickets") {
     return tc.input.status ? `Listing ${tc.input.status.toLowerCase()} tickets…` : "Listing all tickets…";
   }
+  if (tc.name === "update_ticket_status") return `Updating ticket #${tc.input.ticket_id} → ${tc.input.status}…`;
   return `Calling ${tc.name}…`;
 }
 
