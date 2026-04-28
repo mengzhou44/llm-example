@@ -1,6 +1,6 @@
 # llm-example
 
-A ChatGPT-style AI chat app with RAG (knowledge base): Spring Boot gateway + FastAPI AI service backend with streaming SSE, React + Tailwind frontend.
+A ChatGPT-style AI chat app with RAG (knowledge base): Spring Boot gateway + FastAPI AI service ai-service with streaming SSE, React + Tailwind frontend.
 
 ## Architecture
 
@@ -32,11 +32,11 @@ Always use the GitHub MCP server tools (e.g. mcp__github__create_pull_request, m
 
 ```bash
 # AI service
-cp backend/.env.example backend/.env   # add your ANTHROPIC_API_KEY
-pip3.11 install -r backend/requirements.txt
+cp ai-service/.env.example ai-service/.env   # add your ANTHROPIC_API_KEY
+pip3.11 install -r ai-service/requirements.txt
 
 # Gateway (requires Java 21 and Maven 3.x)
-cd spring-backend && mvn install -DskipTests
+cd spring-ai-service && mvn install -DskipTests
 
 # Frontend
 cd frontend && npm install
@@ -46,10 +46,10 @@ cd frontend && npm install
 
 ```bash
 # AI service (port 5000)
-bash backend/start.sh
+bash ai-service/start.sh
 
 # Gateway (port 4000)
-bash spring-backend/start.sh
+bash spring-ai-service/start.sh
 
 # Frontend (port 3000)
 cd frontend && npm run dev
@@ -57,7 +57,7 @@ cd frontend && npm run dev
 
 ## Authentication
 
-All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `spring-backend/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
+All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `spring-ai-service/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
 
 ## API
 
@@ -82,7 +82,7 @@ data: [DONE]
 ```
 `source` values: `"both"` (KB context injected + AI general knowledge), `"general_ai"` (no KB retrieval).
 
-Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `backend/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/App.jsx`.
+Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `ai-service/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/App.jsx`.
 
 **Session management**: conversation history is stored in memory keyed by `session_id`. The frontend generates a UUID on first load and persists it in `localStorage` so the session survives page reloads. Oldest messages are silently dropped when history exceeds the ~7168 token budget.
 
@@ -90,13 +90,13 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 
 **RAG + intelligent routing**: before retrieval, a fast YES/NO classifier call (same Claude model, `max_tokens=5`) decides whether the query warrants a KB lookup. Personal/document-specific questions retrieve from the KB; general questions skip retrieval entirely. If KB is empty the classifier is never called. Falls back to using KB on classifier failure. The routing decision is returned as the first SSE event `{"source": "both"|"general_ai"}` and displayed as a pill badge in the UI.
 
-**AI agent tool use**: Claude is given a set of tools on every `/chat/stream` call. If it decides to use a tool (`stop_reason == "tool_use"`), the backend executes the tool, feeds the result back, and streams the final answer. A `{"tool_call": {"name": "...", "input": {...}}}` SSE event is emitted before each execution so the UI can show a progress indicator. Tool-use turns are stored in session history so follow-up questions have full context.
+**AI agent tool use**: Claude is given a set of tools on every `/chat/stream` call. If it decides to use a tool (`stop_reason == "tool_use"`), the ai-service executes the tool, feeds the result back, and streams the final answer. A `{"tool_call": {"name": "...", "input": {...}}}` SSE event is emitted before each execution so the UI can show a progress indicator. Tool-use turns are stored in session history so follow-up questions have full context.
 
 Available tools:
 - `get_support_ticket` — fetch a single support ticket by ID
 - `list_support_tickets` — list tickets, optionally filtered by status (`Open`, `In Progress`, `Resolved`)
 
-Tool implementations live in `backend/tools/`. Adding a new tool requires: (1) a definition + implementation in `backend/tools/`, (2) registering it in `backend/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
+Tool implementations live in `ai-service/tools/`. Adding a new tool requires: (1) a definition + implementation in `ai-service/tools/`, (2) registering it in `ai-service/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
 
 ### GET /mock/tickets
 List all mock support tickets. Accepts optional `?status=Open|In Progress|Resolved` query param.
@@ -126,7 +126,7 @@ Semantic search over the knowledge base.
 
 ## Configuration
 
-All tunable values are in `backend/.env` (see `.env.example` for defaults):
+All tunable values are in `ai-service/.env` (see `.env.example` for defaults):
 
 | Variable | Default | Description |
 |---|---|---|
@@ -161,7 +161,7 @@ Restart Claude Code after editing `.mcp.json` for changes to take effect.
 ## Project structure
 
 ```
-backend/
+ai-service/
   main.py              # FastAPI app setup, CORS, router registration
   routers/
     chat.py            # /chat, /chat/stream — session history, RAG injection, tool-use loop
@@ -175,7 +175,7 @@ backend/
   start.sh             # Start the AI service (port 5000, python3.11)
   .env                 # API keys and config (gitignored)
   .env.example         # Template for .env
-spring-backend/
+spring-ai-service/
   pom.xml              # Maven build (Spring Boot 3.2, Java 21)
   start.sh             # Start the gateway (port 4000, mvn spring-boot:run)
   src/main/java/com/aiplatform/gateway/
