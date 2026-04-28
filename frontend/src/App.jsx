@@ -68,8 +68,9 @@ export default function App() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -78,16 +79,24 @@ export default function App() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const payload = line.slice(6);
-          if (payload === "[DONE]") break;
-          const { delta } = JSON.parse(payload);
-          setMessages((prev) => {
-            const next = [...prev];
-            next[next.length - 1] = {
-              role: "assistant",
-              content: next[next.length - 1].content + delta,
-            };
-            return next;
-          });
+          if (payload === "[DONE]") { streamDone = true; break; }
+          const data = JSON.parse(payload);
+          if (data.source) {
+            setMessages((prev) => {
+              const next = [...prev];
+              next[next.length - 1] = { ...next[next.length - 1], source: data.source };
+              return next;
+            });
+          } else if (data.delta) {
+            setMessages((prev) => {
+              const next = [...prev];
+              next[next.length - 1] = {
+                ...next[next.length - 1],
+                content: next[next.length - 1].content + data.delta,
+              };
+              return next;
+            });
+          }
         }
       }
     } catch {
@@ -247,6 +256,17 @@ export default function App() {
                   <span className="cursor-blink" />
                 )}
               </span>
+              {msg.role === "assistant" && msg.source && (
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                    msg.source === "both"
+                      ? "bg-purple-100 text-purple-600"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {msg.source === "both" ? "Knowledge Base + AI" : "General AI"}
+                </span>
+              )}
             </div>
           ))}
           <div ref={bottomRef} />
