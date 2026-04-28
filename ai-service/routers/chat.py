@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from reasoning import analyze_intent, build_reasoning_prompt, validate_response
 from routers.knowledge import _cosine_sim, _get_embedding_model, _kb_lock, kb_chunks, kb_documents
 from tools import TOOLS, execute_tool
 
@@ -20,6 +21,8 @@ client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.getenv("MODEL", "claude-haiku-4-5-20251001")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1024"))
 CONTEXT_TOKEN_BUDGET = int(os.getenv("CONTEXT_TOKEN_BUDGET", "7168"))
+ENABLE_VALIDATION = os.getenv("ENABLE_VALIDATION", "true").lower() == "true"
+THINKING_BUDGET_TOKENS = int(os.getenv("THINKING_BUDGET_TOKENS", "2000"))
 
 _BASE = pathlib.Path(__file__).parent.parent
 with open(_BASE / "prompts.yaml") as f:
@@ -34,7 +37,7 @@ KB_MIN_SCORE = float(os.getenv("KB_MIN_SCORE", "0.35"))
 
 
 def _content_to_str(content) -> str:
-    """Flatten a content field (str or list of blocks) to plain text for routing/search."""
+    """Flatten a content field (str or list of blocks) to plain text."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -64,46 +67,6 @@ def _serialize_content_block(block) -> dict:
     if block.type == "tool_use":
         return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
     return {"type": block.type}
-
-
-async def _classify_query(message: str, history: list[dict]) -> bool:
-    """Return True if the query warrants KB retrieval; defaults to True on failure."""
-    async with _kb_lock:
-        doc_names = [doc["name"] for doc in kb_documents.values()]
-    doc_list = ", ".join(doc_names) if doc_names else "none"
-
-    recent = history[:-1][-4:]
-    history_text = (
-        "\n".join(
-            f"{m['role'].upper()}: {_content_to_str(m['content'])[:200]}" for m in recent
-        )
-        if recent
-        else "None"
-    )
-
-    system = (
-        "You are a query router. Decide if the user's question needs a knowledge base lookup.\n"
-        "Reply with exactly one word: YES or NO.\n"
-        "Say YES if the question is about personal information, uploaded documents, or topics "
-        "likely covered in the available documents.\n"
-        "Say NO if the question is general knowledge that doesn't require personal context."
-    )
-    user_content = (
-        f"Available documents: {doc_list}\n"
-        f"Recent conversation:\n{history_text}\n"
-        f"Current question: {message}"
-    )
-
-    try:
-        result = await client.messages.create(
-            model=MODEL,
-            max_tokens=5,
-            system=system,
-            messages=[{"role": "user", "content": user_content}],
-        )
-        return result.content[0].text.strip().upper().startswith("Y")
-    except Exception:
-        return True
 
 
 async def _search_kb(query: str, history: list[dict] | None = None) -> list[dict]:
@@ -182,10 +145,31 @@ async def chat_stream(request: StreamChatRequest):
 
         snapshot = list(history)
 
-    use_kb = await _classify_query(request.message, snapshot) if kb_chunks else False
-    kb_results = await _search_kb(request.message, history=snapshot) if use_kb else []
-    source = "both" if kb_results else "general_ai"
+    return StreamingResponse(
+        _stream_response(request.session_id, system_prompt, request.message, snapshot),
+        media_type="text/event-stream",
+    )
 
+
+async def _stream_response(
+    session_id: str,
+    base_system_prompt: str,
+    message: str,
+    messages: list[dict],
+) -> AsyncIterator[str]:
+    # === Intent Analysis ===
+    yield f"data: {json.dumps({'step': 'analyzing'})}\n\n"
+    intent = await analyze_intent(message, messages, client, MODEL)
+
+    # === RAG Routing ===
+    kb_results: list[dict] = []
+    if intent.requires_kb and kb_chunks:
+        kb_results = await _search_kb(message, history=messages)
+    source = "both" if kb_results else "general_ai"
+    yield f"data: {json.dumps({'source': source})}\n\n"
+
+    # === Build System Prompt (KB context + chain-of-thought) ===
+    system_prompt = base_system_prompt
     if kb_results:
         excerpts = "\n\n".join(
             f"[Source: {kb_documents.get(c['doc_id'], {}).get('name', 'document')} | relevance: {c['score']:.2f}]\n{c['text']}"
@@ -200,36 +184,47 @@ async def chat_stream(request: StreamChatRequest):
             f"{excerpts}\n"
             "</knowledge_base_context>"
         )
+    system_prompt = build_reasoning_prompt(system_prompt)
 
-    return StreamingResponse(
-        _stream_response(request.session_id, system_prompt, snapshot, source),
-        media_type="text/event-stream",
-    )
+    # === First Stream (with optional extended thinking for high complexity) ===
+    accumulated_text: list[str] = []
+    first_message = None
+    high_complexity = intent.complexity == "high"
+    # messages_for_retry tracks the effective history to use if validation fails;
+    # it is updated to include tool-use turns when they occur.
+    messages_for_retry = messages
 
+    call_kwargs: dict = {
+        "model": MODEL,
+        "max_tokens": MAX_TOKENS + (THINKING_BUDGET_TOKENS if high_complexity else 0),
+        "system": system_prompt,
+        "messages": messages,
+        "tools": TOOLS,
+    }
+    if high_complexity:
+        call_kwargs["thinking"] = {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}
 
-async def _stream_response(
-    session_id: str, system_prompt: str, messages: list[dict], source: str
-) -> AsyncIterator[str]:
-    yield f"data: {json.dumps({'source': source})}\n\n"
-    accumulated_text = []
+    try:
+        async with client.messages.stream(**call_kwargs) as stream:
+            async for text in stream.text_stream:
+                accumulated_text.append(text)
+                yield f"data: {json.dumps({'delta': text})}\n\n"
+            first_message = await stream.get_final_message()
+    except anthropic.BadRequestError:
+        # Model does not support extended thinking — fall back to CoT prompt only
+        call_kwargs.pop("thinking", None)
+        call_kwargs["max_tokens"] = MAX_TOKENS
+        accumulated_text = []
+        async with client.messages.stream(**call_kwargs) as stream:
+            async for text in stream.text_stream:
+                accumulated_text.append(text)
+                yield f"data: {json.dumps({'delta': text})}\n\n"
+            first_message = await stream.get_final_message()
 
-    # First call — stream text deltas and detect tool use
-    async with client.messages.stream(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system_prompt,
-        messages=messages,
-        tools=TOOLS,
-    ) as stream:
-        async for text in stream.text_stream:
-            accumulated_text.append(text)
-            yield f"data: {json.dumps({'delta': text})}\n\n"
-        first_message = await stream.get_final_message()
-
-    if first_message.stop_reason == "tool_use":
+    # === Tool-Use Loop ===
+    if first_message and first_message.stop_reason == "tool_use":
         tool_use_blocks = [b for b in first_message.content if b.type == "tool_use"]
 
-        # Extend message history with the assistant's tool-use turn
         extended = list(messages) + [
             {
                 "role": "assistant",
@@ -237,7 +232,6 @@ async def _stream_response(
             }
         ]
 
-        # Execute each tool and collect results
         tool_results = []
         for block in tool_use_blocks:
             yield f"data: {json.dumps({'tool_call': {'name': block.name, 'input': block.input}})}\n\n"
@@ -249,8 +243,10 @@ async def _stream_response(
             })
 
         extended.append({"role": "user", "content": tool_results})
+        messages_for_retry = extended
 
-        # Second call — stream the final answer
+        # Reset so only the final answer text ends up in the history entry.
+        accumulated_text = []
         async with client.messages.stream(
             model=MODEL,
             max_tokens=MAX_TOKENS,
@@ -261,7 +257,6 @@ async def _stream_response(
                 accumulated_text.append(text)
                 yield f"data: {json.dumps({'delta': text})}\n\n"
 
-        # Persist tool-use context in session history for follow-up turns
         sessions[session_id].extend([
             {
                 "role": "assistant",
@@ -270,5 +265,29 @@ async def _stream_response(
             {"role": "user", "content": tool_results},
         ])
 
-    sessions[session_id].append({"role": "assistant", "content": "".join(accumulated_text)})
+    # === Validation and Retry ===
+    full_text = "".join(accumulated_text)
+    if ENABLE_VALIDATION:
+        yield f"data: {json.dumps({'step': 'validating'})}\n\n"
+        if not validate_response(full_text, bool(kb_results), kb_results, kb_documents):
+            yield f"data: {json.dumps({'step': 'retrying'})}\n\n"
+            retry_prompt = system_prompt + (
+                "\n\nIMPORTANT: Your previous response was inadequate. "
+                "Provide a complete, detailed response that fully answers the question."
+            )
+            if kb_results:
+                retry_prompt += " Cite the source documents by name."
+            accumulated_text = []
+            async with client.messages.stream(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=retry_prompt,
+                messages=messages_for_retry,
+            ) as retry_stream:
+                async for text in retry_stream.text_stream:
+                    accumulated_text.append(text)
+                    yield f"data: {json.dumps({'delta': text})}\n\n"
+            full_text = "".join(accumulated_text)
+
+    sessions[session_id].append({"role": "assistant", "content": full_text})
     yield "data: [DONE]\n\n"
