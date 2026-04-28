@@ -8,7 +8,7 @@ Always use the GitHub MCP server tools (e.g. mcp__github__create_pull_request, m
 
 ## Stack
 
-- **Backend**: Python 3.11 + FastAPI + Anthropic SDK (Claude Haiku) + sentence-transformers + python-dotenv + PyYAML
+- **Backend**: Python 3.11 + FastAPI + Anthropic SDK (Claude Haiku) + httpx + sentence-transformers + python-dotenv + PyYAML
 - **Frontend**: React 18 + Vite + Tailwind CSS v3
 
 ## Setup
@@ -63,6 +63,20 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 
 **RAG + intelligent routing**: before retrieval, a fast YES/NO classifier call (same Claude model, `max_tokens=5`) decides whether the query warrants a KB lookup. Personal/document-specific questions retrieve from the KB; general questions skip retrieval entirely. If KB is empty the classifier is never called. Falls back to using KB on classifier failure. The routing decision is returned as the first SSE event `{"source": "both"|"general_ai"}` and displayed as a pill badge in the UI.
 
+**AI agent tool use**: Claude is given a set of tools on every `/chat/stream` call. If it decides to use a tool (`stop_reason == "tool_use"`), the backend executes the tool, feeds the result back, and streams the final answer. A `{"tool_call": {"name": "...", "input": {...}}}` SSE event is emitted before each execution so the UI can show a progress indicator. Tool-use turns are stored in session history so follow-up questions have full context.
+
+Available tools:
+- `get_support_ticket` — fetch a single support ticket by ID
+- `list_support_tickets` — list tickets, optionally filtered by status (`Open`, `In Progress`, `Resolved`)
+
+Tool implementations live in `backend/tools/`. Adding a new tool requires: (1) a definition + implementation in `backend/tools/`, (2) registering it in `backend/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
+
+### GET /mock/tickets
+List all mock support tickets. Accepts optional `?status=Open|In Progress|Resolved` query param.
+
+### GET /mock/tickets/{ticket_id}
+Fetch a single mock support ticket by numeric ID (1001–1005).
+
 ### POST /knowledge/upload
 Upload a document (.txt, .md, .pdf, .docx — max 10 MB). Text is extracted, split into 500-char chunks with 50-char overlap, and embedded via `sentence-transformers` (`all-MiniLM-L6-v2`). Returns document metadata.
 
@@ -104,6 +118,7 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 - Light mode theme (white/gray-50 background, blue user bubbles)
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
 - Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
+- Tool call indicator (italic `↳ Fetching…` line) shown in assistant bubble when a tool is executing
 - Sidebar: template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - Footer: "Easy Express Solutions Inc. © 2026"
 - Enter to send, Shift+Enter for newline; blinking cursor while streaming
@@ -122,8 +137,12 @@ Restart Claude Code after editing `.mcp.json` for changes to take effect.
 backend/
   main.py              # FastAPI app setup, CORS, router registration
   routers/
-    chat.py            # /chat, /chat/stream — session history + RAG injection
+    chat.py            # /chat, /chat/stream — session history, RAG injection, tool-use loop
     knowledge.py       # /knowledge/* — upload, list, delete, search
+    mock_tickets.py    # /mock/tickets — mock external support ticket system
+  tools/
+    __init__.py        # Tool registry (TOOLS list) + execute_tool dispatcher
+    support_tickets.py # get_support_ticket and list_support_tickets definitions + httpx impl
   prompts.yaml         # System prompt templates
   requirements.txt     # Python dependencies
   start.sh             # Start the backend server (port 4000, python3.11)
