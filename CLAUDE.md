@@ -1,22 +1,42 @@
 # llm-example
 
-A ChatGPT-style AI chat app with RAG (knowledge base): FastAPI backend with streaming SSE, React + Tailwind frontend.
+A ChatGPT-style AI chat app with RAG (knowledge base): Spring Boot gateway + FastAPI AI service backend with streaming SSE, React + Tailwind frontend.
 
+## Architecture
+
+```
+React (port 3000)
+    │  HTTP + SSE  (X-Auth-Token header)
+    ▼
+Spring Boot Gateway (port 4000)   ← auth stub, request validation, API management
+    │  HTTP proxy
+    ▼
+FastAPI AI Service (port 5000)    ← Claude, RAG, tool use, session history
+    │  httpx loopback
+    ▼
+/mock/tickets  (internal, same FastAPI process)
+```
+
+The Spring Boot gateway is the single entry point for the frontend. It validates the `X-Auth-Token` header on every request, then proxies AI endpoints (`/chat`, `/chat/stream`, `/knowledge/*`) to the Python service. SSE streaming is proxied transparently at the byte level so the frontend receives the exact same wire format from FastAPI.
 
 ## GitHub operations
 Always use the GitHub MCP server tools (e.g. mcp__github__create_pull_request, mcp__github__get_pull_request, etc.) for all GitHub interactions — pull requests, issues, branches, reviews, and file operations. Do NOT use the gh CLI for GitHub tasks.
 
 ## Stack
 
-- **Backend**: Python 3.11 + FastAPI + Anthropic SDK (Claude Haiku) + httpx + sentence-transformers + python-dotenv + PyYAML
+- **Gateway**: Java 21 + Spring Boot 3.2 + WebClient (spring-boot-starter-webflux)
+- **AI service**: Python 3.11 + FastAPI + Anthropic SDK (Claude Haiku) + httpx + sentence-transformers + python-dotenv + PyYAML
 - **Frontend**: React 18 + Vite + Tailwind CSS v3
 
 ## Setup
 
 ```bash
-# Backend
+# AI service
 cp backend/.env.example backend/.env   # add your ANTHROPIC_API_KEY
 pip3.11 install -r backend/requirements.txt
+
+# Gateway (requires Java 21 and Maven 3.x)
+cd spring-backend && mvn install -DskipTests
 
 # Frontend
 cd frontend && npm install
@@ -25,12 +45,19 @@ cd frontend && npm install
 ## Run
 
 ```bash
-# Backend (port 4000)
+# AI service (port 5000)
 bash backend/start.sh
+
+# Gateway (port 4000)
+bash spring-backend/start.sh
 
 # Frontend (port 3000)
 cd frontend && npm run dev
 ```
+
+## Authentication
+
+All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `spring-backend/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
 
 ## API
 
@@ -145,9 +172,24 @@ backend/
     support_tickets.py # get_support_ticket and list_support_tickets definitions + httpx impl
   prompts.yaml         # System prompt templates
   requirements.txt     # Python dependencies
-  start.sh             # Start the backend server (port 4000, python3.11)
+  start.sh             # Start the AI service (port 5000, python3.11)
   .env                 # API keys and config (gitignored)
   .env.example         # Template for .env
+spring-backend/
+  pom.xml              # Maven build (Spring Boot 3.2, Java 21)
+  start.sh             # Start the gateway (port 4000, mvn spring-boot:run)
+  src/main/java/com/aiplatform/gateway/
+    GatewayApplication.java          # Spring Boot entry point
+    config/
+      WebClientConfig.java           # WebClient bean → http://localhost:5000
+      CorsConfig.java                # CORS filter (order 0, allows localhost:3000)
+    filter/
+      AuthenticationFilter.java      # X-Auth-Token header check (order 1)
+    controller/
+      ChatController.java            # /chat, /chat/stream (byte-level SSE proxy)
+      KnowledgeController.java       # /knowledge/* proxy
+  src/main/resources/
+    application.properties           # server.port=4000, ai.service.url, auth.token
 frontend/
   src/
     App.jsx            # Chat UI + Knowledge Base sidebar section

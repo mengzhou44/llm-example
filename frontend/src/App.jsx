@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const BACKEND = "http://localhost:4000";
+const AUTH_TOKEN = "dev-token-123";
 const TEMPLATES = ["helpful_assistant", "code_reviewer", "teacher"];
 
 function getSessionId() {
@@ -37,7 +38,7 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
-    fetch(`${BACKEND}/knowledge/documents`)
+    fetch(`${BACKEND}/knowledge/documents`, { headers: { "X-Auth-Token": AUTH_TOKEN } })
       .then((r) => r.json())
       .then(setDocuments)
       .catch(() => {});
@@ -59,7 +60,7 @@ export default function App() {
     try {
       const res = await fetch(`${BACKEND}/chat/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Auth-Token": AUTH_TOKEN },
         body: JSON.stringify({ message: text, session_id: sessionId.current, template }),
       });
 
@@ -144,7 +145,11 @@ export default function App() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${BACKEND}/knowledge/upload`, { method: "POST", body: fd });
+      const res = await fetch(`${BACKEND}/knowledge/upload`, {
+        method: "POST",
+        headers: { "X-Auth-Token": AUTH_TOKEN },
+        body: fd,
+      });
       if (!res.ok) {
         const err = await res.json();
         setKbError(err.detail || "Upload failed");
@@ -162,7 +167,10 @@ export default function App() {
   async function deleteDocument(docId) {
     setKbError("");
     try {
-      const res = await fetch(`${BACKEND}/knowledge/documents/${docId}`, { method: "DELETE" });
+      const res = await fetch(`${BACKEND}/knowledge/documents/${docId}`, {
+        method: "DELETE",
+        headers: { "X-Auth-Token": AUTH_TOKEN },
+      });
       if (res.ok) {
         setDocuments((prev) => prev.filter((d) => d.id !== docId));
       } else {
