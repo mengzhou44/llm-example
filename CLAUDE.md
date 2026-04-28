@@ -95,6 +95,7 @@ Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined
 Available tools:
 - `get_support_ticket` — fetch a single support ticket by ID
 - `list_support_tickets` — list tickets, optionally filtered by status (`Open`, `In Progress`, `Resolved`)
+- `update_ticket_status` — update ticket status (and optional resolution note); valid statuses: `Open`, `In Progress`, `Resolved`
 
 Tool implementations live in `ai-service/tools/`. Adding a new tool requires: (1) a definition + implementation in `ai-service/tools/`, (2) registering it in `ai-service/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
 
@@ -103,6 +104,15 @@ List all mock support tickets. Accepts optional `?status=Open|In Progress|Resolv
 
 ### GET /mock/tickets/{ticket_id}
 Fetch a single mock support ticket by numeric ID (1001–1005).
+
+### POST /mock/tickets/{ticket_id}/update
+Update a mock ticket's status and optional resolution note.
+```json
+// Request
+{ "status": "Resolved", "resolution": "Fixed in v2.4.0" }
+// Response — full updated ticket object
+```
+Valid statuses: `Open`, `In Progress`, `Resolved`. Changes are in-memory only (reset on restart).
 
 ### POST /analyze/issue
 Analyze a support ticket and return structured AI insights.

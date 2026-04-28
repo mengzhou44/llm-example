@@ -1,6 +1,14 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/mock")
+
+_VALID_STATUSES = {"Open", "In Progress", "Resolved"}
+
+
+class TicketUpdateRequest(BaseModel):
+    status: str
+    resolution: str | None = None
 
 _TICKETS = {
     "1001": {
@@ -64,4 +72,20 @@ async def get_ticket(ticket_id: str):
     ticket = _TICKETS.get(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+    return ticket
+
+
+@router.post("/tickets/{ticket_id}/update")
+async def update_ticket(ticket_id: str, body: TicketUpdateRequest):
+    ticket = _TICKETS.get(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+    if body.status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{body.status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+        )
+    ticket["status"] = body.status
+    if body.resolution is not None:
+        ticket["resolution"] = body.resolution
     return ticket
