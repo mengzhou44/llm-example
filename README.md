@@ -19,10 +19,10 @@ git clone https://github.com/mengzhou44/llm-example.git
 cd llm-example
 ```
 
-### 2. Set up the backend
+### 2. Set up the ai-service
 
 ```bash
-cd backend
+cd ai-service
 cp .env.example .env          # then open .env and add your ANTHROPIC_API_KEY
 pip3.11 install -r requirements.txt
 ```
@@ -39,8 +39,8 @@ npm install
 Open two terminals:
 
 ```bash
-# Terminal 1 — backend (http://localhost:4000)
-bash backend/start.sh
+# Terminal 1 — ai-service (http://localhost:4000)
+bash ai-service/start.sh
 
 # Terminal 2 — frontend (http://localhost:3000)
 cd frontend && npm run dev
@@ -57,7 +57,7 @@ Then open **http://localhost:3000** in your browser.
 
 ## Adding a new template
 
-Edit `backend/prompts.yaml` and add a new key:
+Edit `ai-service/prompts.yaml` and add a new key:
 
 ```yaml
 templates:

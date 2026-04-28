@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const BACKEND = "http://localhost:4000";
+const AUTH_TOKEN = "dev-token-123";
 const TEMPLATES = ["helpful_assistant", "code_reviewer", "teacher"];
 
 function getSessionId() {
@@ -10,6 +11,14 @@ function getSessionId() {
     localStorage.setItem("chat_session_id", id);
   }
   return id;
+}
+
+function formatToolCall(tc) {
+  if (tc.name === "get_support_ticket") return `Fetching support ticket #${tc.input.ticket_id}…`;
+  if (tc.name === "list_support_tickets") {
+    return tc.input.status ? `Listing ${tc.input.status.toLowerCase()} tickets…` : "Listing all tickets…";
+  }
+  return `Calling ${tc.name}…`;
 }
 
 export default function App() {
@@ -29,7 +38,7 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
-    fetch(`${BACKEND}/knowledge/documents`)
+    fetch(`${BACKEND}/knowledge/documents`, { headers: { "X-Auth-Token": AUTH_TOKEN } })
       .then((r) => r.json())
       .then(setDocuments)
       .catch(() => {});
@@ -51,7 +60,7 @@ export default function App() {
     try {
       const res = await fetch(`${BACKEND}/chat/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Auth-Token": AUTH_TOKEN },
         body: JSON.stringify({ message: text, session_id: sessionId.current, template }),
       });
 
@@ -85,6 +94,16 @@ export default function App() {
             setMessages((prev) => {
               const next = [...prev];
               next[next.length - 1] = { ...next[next.length - 1], source: data.source };
+              return next;
+            });
+          } else if (data.tool_call) {
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              next[next.length - 1] = {
+                ...last,
+                toolCalls: [...(last.toolCalls || []), data.tool_call],
+              };
               return next;
             });
           } else if (data.delta) {
@@ -126,7 +145,11 @@ export default function App() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${BACKEND}/knowledge/upload`, { method: "POST", body: fd });
+      const res = await fetch(`${BACKEND}/knowledge/upload`, {
+        method: "POST",
+        headers: { "X-Auth-Token": AUTH_TOKEN },
+        body: fd,
+      });
       if (!res.ok) {
         const err = await res.json();
         setKbError(err.detail || "Upload failed");
@@ -144,7 +167,10 @@ export default function App() {
   async function deleteDocument(docId) {
     setKbError("");
     try {
-      const res = await fetch(`${BACKEND}/knowledge/documents/${docId}`, { method: "DELETE" });
+      const res = await fetch(`${BACKEND}/knowledge/documents/${docId}`, {
+        method: "DELETE",
+        headers: { "X-Auth-Token": AUTH_TOKEN },
+      });
       if (res.ok) {
         setDocuments((prev) => prev.filter((d) => d.id !== docId));
       } else {
@@ -244,6 +270,11 @@ export default function App() {
               key={i}
               className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
+              {msg.role === "assistant" && msg.toolCalls?.map((tc, j) => (
+                <span key={j} className="text-[12px] text-gray-400 italic">
+                  ↳ {formatToolCall(tc)}
+                </span>
+              ))}
               <span
                 className={`text-[15px] leading-relaxed whitespace-pre-wrap break-words ${
                   msg.role === "user"
