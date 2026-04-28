@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const BACKEND = "http://localhost:4000";
 const AUTH_TOKEN = "dev-token-123";
@@ -32,6 +34,7 @@ export default function App() {
   const bottomRef = useRef(null);
   const sessionId = useRef(getSessionId());
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -55,6 +58,7 @@ export default function App() {
       { role: "assistant", content: "" },
     ]);
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setStreaming(true);
 
     try {
@@ -275,18 +279,20 @@ export default function App() {
                   ↳ {formatToolCall(tc)}
                 </span>
               ))}
-              <span
-                className={`text-[15px] leading-relaxed whitespace-pre-wrap break-words ${
-                  msg.role === "user"
-                    ? "bg-blue-500 text-white rounded-[18px] rounded-br-[4px] px-4 py-3 max-w-[72%]"
-                    : "text-gray-800 max-w-full"
-                }`}
-              >
-                {msg.content}
-                {msg.role === "assistant" && streaming && i === messages.length - 1 && (
-                  <span className="cursor-blink" />
-                )}
-              </span>
+              {msg.role === "user" ? (
+                <span className="bg-blue-500 text-white rounded-[18px] rounded-br-[4px] px-4 py-3 max-w-[72%] text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+                  {msg.content}
+                </span>
+              ) : (
+                <div className="markdown-body max-w-full">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
+                  {streaming && i === messages.length - 1 && (
+                    <span className="cursor-blink" />
+                  )}
+                </div>
+              )}
               {msg.role === "assistant" && msg.source && (
                 <span
                   className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
@@ -309,10 +315,15 @@ export default function App() {
           className="flex items-end gap-2 px-[20%] py-4 border-t border-gray-200 bg-white"
         >
           <textarea
+            ref={textareaRef}
             rows={1}
             placeholder="Message…"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = Math.min(e.target.scrollHeight, 192) + "px";
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(e); }
             }}
