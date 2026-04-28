@@ -23,6 +23,13 @@ function formatToolCall(tc) {
   return `Calling ${tc.name}…`;
 }
 
+function formatStep(step) {
+  if (step === "analyzing") return "Analyzing intent…";
+  if (step === "validating") return "Validating response…";
+  if (step === "retrying") return "Retrying…";
+  return step;
+}
+
 export default function App() {
   const [mode, setMode] = useState("chat");
   const [messages, setMessages] = useState([]);
@@ -97,9 +104,28 @@ export default function App() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const payload = line.slice(6);
-          if (payload === "[DONE]") { streamDone = true; break; }
+          if (payload === "[DONE]") {
+            setMessages((prev) => {
+              const next = [...prev];
+              next[next.length - 1] = { ...next[next.length - 1], step: null };
+              return next;
+            });
+            streamDone = true;
+            break;
+          }
           const data = JSON.parse(payload);
-          if (data.source) {
+          if (data.step) {
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (data.step === "retrying") {
+                next[next.length - 1] = { ...last, content: "", toolCalls: [], step: data.step };
+              } else {
+                next[next.length - 1] = { ...last, step: data.step };
+              }
+              return next;
+            });
+          } else if (data.source) {
             setMessages((prev) => {
               const next = [...prev];
               next[next.length - 1] = { ...next[next.length - 1], source: data.source };
@@ -329,6 +355,11 @@ export default function App() {
                   key={i}
                   className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
                 >
+                  {msg.role === "assistant" && streaming && i === messages.length - 1 && msg.step && (
+                    <span className="text-[12px] text-gray-400 italic">
+                      ↳ {formatStep(msg.step)}
+                    </span>
+                  )}
                   {msg.role === "assistant" && msg.toolCalls?.map((tc, j) => (
                     <span key={j} className="text-[12px] text-gray-400 italic">
                       ↳ {formatToolCall(tc)}
