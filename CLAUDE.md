@@ -36,7 +36,7 @@ cp ai-service/.env.example ai-service/.env   # add your ANTHROPIC_API_KEY
 pip3.11 install -r ai-service/requirements.txt
 
 # Gateway (requires Java 21 and Maven 3.x)
-cd spring-ai-service && mvn install -DskipTests
+cd backend && mvn install -DskipTests
 
 # Frontend
 cd frontend && npm install
@@ -49,7 +49,7 @@ cd frontend && npm install
 bash ai-service/start.sh
 
 # Gateway (port 4000)
-bash spring-ai-service/start.sh
+bash backend/start.sh
 
 # Frontend (port 3000)
 cd frontend && npm run dev
@@ -57,7 +57,7 @@ cd frontend && npm run dev
 
 ## Authentication
 
-All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `spring-ai-service/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
+All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `backend/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
 
 ## API
 
@@ -175,7 +175,7 @@ ai-service/
   start.sh             # Start the AI service (port 5000, python3.11)
   .env                 # API keys and config (gitignored)
   .env.example         # Template for .env
-spring-ai-service/
+backend/
   pom.xml              # Maven build (Spring Boot 3.2, Java 21)
   start.sh             # Start the gateway (port 4000, mvn spring-boot:run)
   src/main/java/com/aiplatform/gateway/
