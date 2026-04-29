@@ -1,5 +1,10 @@
 package com.aiplatform.gateway.controller;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -8,6 +13,7 @@ import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
@@ -16,10 +22,17 @@ import java.util.Map;
 @RestController
 public class KnowledgeController {
 
-    private final WebClient webClient;
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeController.class);
 
-    public KnowledgeController(WebClient aiServiceClient) {
+    private static final String SERVICE_UNAVAILABLE_JSON =
+        "{\"detail\":\"AI service is currently unavailable. Please try again shortly.\"}";
+
+    private final WebClient webClient;
+    private final CircuitBreaker circuitBreaker;
+
+    public KnowledgeController(WebClient aiServiceClient, CircuitBreaker aiServiceCircuitBreaker) {
         this.webClient = aiServiceClient;
+        this.circuitBreaker = aiServiceCircuitBreaker;
     }
 
     @GetMapping(value = "/knowledge/documents", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -65,13 +78,27 @@ public class KnowledgeController {
     }
 
     private ResponseEntity<String> proxy(WebClient.RequestHeadersSpec<?> spec) {
-        return spec.exchangeToMono(response ->
-            response.bodyToMono(String.class)
-                .defaultIfEmpty("")
-                .map(body -> ResponseEntity
-                    .status(response.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body))
-        ).block();
+        try {
+            return spec.exchangeToMono(response ->
+                response.bodyToMono(String.class)
+                    .defaultIfEmpty("")
+                    .map(body -> ResponseEntity
+                        .status(response.statusCode())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body))
+            )
+            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
+            .block();
+        } catch (CallNotPermittedException e) {
+            log.warn("Circuit breaker OPEN — rejecting knowledge request");
+            return ResponseEntity.status(503)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(SERVICE_UNAVAILABLE_JSON);
+        } catch (WebClientRequestException e) {
+            log.error("AI service connection error on knowledge endpoint: {}", e.getMessage());
+            return ResponseEntity.status(503)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(SERVICE_UNAVAILABLE_JSON);
+        }
     }
 }
