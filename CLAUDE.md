@@ -11,7 +11,7 @@ React (port 3000)
 Spring Boot Gateway (port 4000)   ← auth stub, request validation, API management
     │  HTTP proxy
     ▼
-FastAPI AI Service (port 5000)    ← Claude, RAG, tool use, session history
+FastAPI AI Service (port 5001)    ← Claude, RAG, tool use, session history
     │  httpx loopback
     ▼
 /mock/tickets  (internal, same FastAPI process)
@@ -44,8 +44,14 @@ cd frontend && npm install
 
 ## Run
 
+One-command start (all three services):
 ```bash
-# AI service (port 5000)
+bash start.sh
+```
+
+Or manually in three terminals:
+```bash
+# AI service (port 5001)
 bash ai-service/start.sh
 
 # Gateway (port 4000)
@@ -57,7 +63,7 @@ cd frontend && npm run dev
 
 ## Authentication
 
-All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value is configured in `backend/src/main/resources/application.properties` (`auth.token`). This is a lightweight stub — replace with a real auth mechanism before production use.
+All requests from the frontend must include the header `X-Auth-Token: dev-token-123`. The gateway returns `401` if the header is missing or incorrect. The token value defaults to `dev-token-123` and is configured in `backend/src/main/resources/application.properties` (`auth.token`), overridable via the `AUTH_TOKEN` environment variable. The frontend reads it from `VITE_AUTH_TOKEN` (see `frontend/.env.example`). This is a lightweight stub — replace with a real auth mechanism before production use.
 
 ## API
 
@@ -82,7 +88,7 @@ data: [DONE]
 ```
 `source` values: `"both"` (KB context injected + AI general knowledge), `"general_ai"` (no KB retrieval).
 
-Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `ai-service/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/App.jsx`.
+Available templates: `helpful_assistant`, `code_reviewer`, `teacher` — defined in `ai-service/prompts.yaml`. Add a new key there to create a new template; also add it to the `TEMPLATES` array in `frontend/src/components/Sidebar.jsx`.
 
 **Session management**: conversation history is stored in memory keyed by `session_id`. The frontend generates a UUID on first load and persists it in `localStorage` so the session survives page reloads. Oldest messages are silently dropped when history exceeds the ~7168 token budget.
 
@@ -97,7 +103,7 @@ Available tools:
 - `list_support_tickets` — list tickets, optionally filtered by status (`Open`, `In Progress`, `Resolved`)
 - `update_ticket_status` — update ticket status (and optional resolution note); valid statuses: `Open`, `In Progress`, `Resolved`
 
-Tool implementations live in `ai-service/tools/`. Adding a new tool requires: (1) a definition + implementation in `ai-service/tools/`, (2) registering it in `ai-service/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/App.jsx` for the UI label.
+Tool implementations live in `ai-service/tools/`. Adding a new tool requires: (1) a definition + implementation in `ai-service/tools/`, (2) registering it in `ai-service/tools/__init__.py`, (3) updating `formatToolCall` in `frontend/src/components/MessageBubble.jsx` for the UI label.
 
 ### GET /mock/tickets
 List all mock support tickets. Accepts optional `?status=Open|In Progress|Resolved` query param.
@@ -167,7 +173,7 @@ React 18 + Vite + Tailwind CSS v3 SPA at `http://localhost:3000`.
 - Streams token-by-token via `fetch` + `ReadableStream` (SSE over POST)
 - **Markdown rendering**: assistant responses are rendered via `react-markdown` + `remark-gfm` — supports code blocks, lists, bold/italic, tables, blockquotes. User messages remain plain text. Styles live in `.markdown-body` in `App.css`.
 - Source badge under each assistant message: purple "Knowledge Base + AI" or gray "General AI"
-- Tool call indicator (italic `↳ Fetching…` / `↳ Updating…` line) shown in assistant bubble when a tool is executing
+- Tool call indicator: `↳ Action…` (italic, in-progress) or `✓ Action` (completed) shown in assistant bubble
 - Sidebar: Chat/Analyzer mode toggle, template dropdown, Knowledge Base section (upload + document list), "New chat" button
 - **Issue Analyzer mode**: paste raw ticket text or type a ticket ID (e.g. "analyze ticket 1001"); displays a structured result card with Summary, Root Cause, and Suggestion sections; shows a Ticket # header when an ID was resolved automatically
 - Footer: "Easy Express Solutions Inc. © 2026"
@@ -197,7 +203,7 @@ ai-service/
     support_tickets.py # get_support_ticket and list_support_tickets definitions + httpx impl
   prompts.yaml         # System prompt templates
   requirements.txt     # Python dependencies
-  start.sh             # Start the AI service (port 5000, python3.11)
+  start.sh             # Start the AI service (port 5001, python3.11)
   .env                 # API keys and config (gitignored)
   .env.example         # Template for .env
 backend/
@@ -218,14 +224,24 @@ backend/
     application.properties           # server.port=4000, ai.service.url, auth.token
 frontend/
   src/
-    App.jsx            # Chat UI + Issue Analyzer mode + Knowledge Base sidebar section
+    App.jsx            # State, event handlers, top-level layout
     App.css            # Tailwind directives + cursor-blink keyframe + .markdown-body prose styles
     main.jsx           # React entry point
+    components/
+      Sidebar.jsx      # Mode toggle, template selector (TEMPLATES array lives here), new chat
+      KnowledgeBase.jsx # Upload + document list with inline delete confirmation
+      MessageList.jsx  # Scrollable chat area + welcome screen with prompt chips
+      MessageBubble.jsx # Single message — user/assistant, tool calls (formatToolCall lives here), source badge
+      ChatInput.jsx    # Auto-resize textarea + send button
+      WelcomeScreen.jsx # Empty state with clickable suggested prompt chips
+      IssueAnalyzer.jsx # Issue Analyzer mode with skeleton loading state
   index.html
   package.json
   vite.config.js
   tailwind.config.js
   postcss.config.js
+  .env.example         # VITE_AUTH_TOKEN template
+start.sh               # One-command launcher for all three services
 .mcp.json              # MCP server config (gitignored — contains secrets)
 README.md              # Getting started guide
 ```
