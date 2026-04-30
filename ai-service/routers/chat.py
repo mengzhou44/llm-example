@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import pathlib
 from typing import AsyncIterator
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 from reasoning import analyze_intent, build_reasoning_prompt, validate_response
 from routers.knowledge import _cosine_sim, _get_embedding_model, _kb_lock, kb_chunks, kb_documents
 from tools import TOOLS, execute_tool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -34,6 +37,34 @@ session_locks: dict[str, asyncio.Lock] = {}
 
 KB_TOP_K = int(os.getenv("KB_TOP_K", "3"))
 KB_MIN_SCORE = float(os.getenv("KB_MIN_SCORE", "0.35"))
+
+# Errors that warrant a single retry — transient API/network issues.
+_RETRYABLE = (
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+    anthropic.APIConnectionError,
+)
+
+
+def _error_code(exc: Exception) -> str:
+    if isinstance(exc, anthropic.RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, anthropic.InternalServerError):
+        return "server_error"
+    if isinstance(exc, anthropic.APIConnectionError):
+        return "connection_error"
+    if isinstance(exc, anthropic.AuthenticationError):
+        return "auth_error"
+    if isinstance(exc, anthropic.BadRequestError):
+        return "bad_request"
+    return "unknown"
+
+
+def _error_events(exc: Exception) -> list[str]:
+    """Return the two terminal SSE event strings for a Claude API error."""
+    logger.error("Claude API error: %s: %s", type(exc).__name__, exc)
+    payload = {"error": {"code": _error_code(exc), "message": str(exc)}}
+    return [f"data: {json.dumps(payload)}\n\n", "data: [DONE]\n\n"]
 
 
 def _content_to_str(content) -> str:
@@ -160,6 +191,8 @@ async def _stream_response(
     # === Intent Analysis ===
     yield f"data: {json.dumps({'step': 'analyzing'})}\n\n"
     intent = await analyze_intent(message, messages, client, MODEL)
+    logger.info("session=%s intent: requires_kb=%s complexity=%s topic=%r",
+                session_id, intent.requires_kb, intent.complexity, intent.topic)
 
     # === RAG Routing ===
     kb_results: list[dict] = []
@@ -190,8 +223,8 @@ async def _stream_response(
     accumulated_text: list[str] = []
     first_message = None
     high_complexity = intent.complexity == "high"
-    # messages_for_retry tracks the effective history to use if validation fails;
-    # it is updated to include tool-use turns when they occur.
+    # messages_for_retry tracks the effective history used if quality-validation retry fires;
+    # updated to include tool-use turns when they occur.
     messages_for_retry = messages
 
     call_kwargs: dict = {
@@ -211,15 +244,50 @@ async def _stream_response(
                 yield f"data: {json.dumps({'delta': text})}\n\n"
             first_message = await stream.get_final_message()
     except anthropic.BadRequestError:
-        # Model does not support extended thinking — fall back to CoT prompt only
+        # Model does not support extended thinking — fall back to CoT prompt only.
         call_kwargs.pop("thinking", None)
         call_kwargs["max_tokens"] = MAX_TOKENS
         accumulated_text = []
-        async with client.messages.stream(**call_kwargs) as stream:
-            async for text in stream.text_stream:
-                accumulated_text.append(text)
-                yield f"data: {json.dumps({'delta': text})}\n\n"
-            first_message = await stream.get_final_message()
+        try:
+            async with client.messages.stream(**call_kwargs) as stream:
+                async for text in stream.text_stream:
+                    accumulated_text.append(text)
+                    yield f"data: {json.dumps({'delta': text})}\n\n"
+                first_message = await stream.get_final_message()
+        except _RETRYABLE as exc:
+            yield f"data: {json.dumps({'step': 'retrying_api'})}\n\n"
+            try:
+                accumulated_text = []
+                async with client.messages.stream(**call_kwargs) as stream:
+                    async for text in stream.text_stream:
+                        accumulated_text.append(text)
+                        yield f"data: {json.dumps({'delta': text})}\n\n"
+                    first_message = await stream.get_final_message()
+            except Exception as exc2:
+                for chunk in _error_events(exc2):
+                    yield chunk
+                return
+        except Exception as exc:
+            for chunk in _error_events(exc):
+                yield chunk
+            return
+    except _RETRYABLE as exc:
+        yield f"data: {json.dumps({'step': 'retrying_api'})}\n\n"
+        try:
+            accumulated_text = []
+            async with client.messages.stream(**call_kwargs) as stream:
+                async for text in stream.text_stream:
+                    accumulated_text.append(text)
+                    yield f"data: {json.dumps({'delta': text})}\n\n"
+                first_message = await stream.get_final_message()
+        except Exception as exc2:
+            for chunk in _error_events(exc2):
+                yield chunk
+            return
+    except Exception as exc:
+        for chunk in _error_events(exc):
+            yield chunk
+        return
 
     # === Tool-Use Loop ===
     if first_message and first_message.stop_reason == "tool_use":
@@ -235,6 +303,7 @@ async def _stream_response(
         tool_results = []
         for block in tool_use_blocks:
             yield f"data: {json.dumps({'tool_call': {'name': block.name, 'input': block.input}})}\n\n"
+            logger.info("session=%s tool_call: %s input=%s", session_id, block.name, block.input)
             result = await execute_tool(block.name, block.input)
             tool_results.append({
                 "type": "tool_result",
@@ -245,17 +314,34 @@ async def _stream_response(
         extended.append({"role": "user", "content": tool_results})
         messages_for_retry = extended
 
-        # Reset so only the final answer text ends up in the history entry.
         accumulated_text = []
-        async with client.messages.stream(
+        tool_stream_kwargs = dict(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=system_prompt,
             messages=extended,
-        ) as stream2:
-            async for text in stream2.text_stream:
-                accumulated_text.append(text)
-                yield f"data: {json.dumps({'delta': text})}\n\n"
+        )
+        try:
+            async with client.messages.stream(**tool_stream_kwargs) as stream2:
+                async for text in stream2.text_stream:
+                    accumulated_text.append(text)
+                    yield f"data: {json.dumps({'delta': text})}\n\n"
+        except _RETRYABLE as exc:
+            yield f"data: {json.dumps({'step': 'retrying_api'})}\n\n"
+            try:
+                accumulated_text = []
+                async with client.messages.stream(**tool_stream_kwargs) as stream2:
+                    async for text in stream2.text_stream:
+                        accumulated_text.append(text)
+                        yield f"data: {json.dumps({'delta': text})}\n\n"
+            except Exception as exc2:
+                for chunk in _error_events(exc2):
+                    yield chunk
+                return
+        except Exception as exc:
+            for chunk in _error_events(exc):
+                yield chunk
+            return
 
         sessions[session_id].extend([
             {
@@ -278,16 +364,35 @@ async def _stream_response(
             if kb_results:
                 retry_prompt += " Cite the source documents by name."
             accumulated_text = []
-            async with client.messages.stream(
+            quality_retry_kwargs = dict(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=retry_prompt,
                 messages=messages_for_retry,
-            ) as retry_stream:
-                async for text in retry_stream.text_stream:
-                    accumulated_text.append(text)
-                    yield f"data: {json.dumps({'delta': text})}\n\n"
+            )
+            try:
+                async with client.messages.stream(**quality_retry_kwargs) as retry_stream:
+                    async for text in retry_stream.text_stream:
+                        accumulated_text.append(text)
+                        yield f"data: {json.dumps({'delta': text})}\n\n"
+            except _RETRYABLE as exc:
+                yield f"data: {json.dumps({'step': 'retrying_api'})}\n\n"
+                try:
+                    accumulated_text = []
+                    async with client.messages.stream(**quality_retry_kwargs) as retry_stream:
+                        async for text in retry_stream.text_stream:
+                            accumulated_text.append(text)
+                            yield f"data: {json.dumps({'delta': text})}\n\n"
+                except Exception as exc2:
+                    for chunk in _error_events(exc2):
+                        yield chunk
+                    return
+            except Exception as exc:
+                for chunk in _error_events(exc):
+                    yield chunk
+                return
             full_text = "".join(accumulated_text)
 
     sessions[session_id].append({"role": "assistant", "content": full_text})
+    logger.info("session=%s response complete, length=%d chars", session_id, len(full_text))
     yield "data: [DONE]\n\n"

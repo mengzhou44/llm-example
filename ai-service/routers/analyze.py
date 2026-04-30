@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import pathlib
 import re
@@ -10,12 +11,20 @@ from pydantic import BaseModel
 
 from routers.mock_tickets import _TICKETS
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 MODEL = os.getenv("MODEL", "claude-haiku-4-5-20251001")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1024"))
+
+_RETRYABLE = (
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+    anthropic.APIConnectionError,
+)
 
 _BASE = pathlib.Path(__file__).parent.parent
 with open(_BASE / "prompts.yaml") as f:
@@ -66,12 +75,27 @@ async def analyze_issue(request: AnalyzeRequest):
 
     content, ticket_id = _resolve_description(request.description.strip())
 
-    message = await client.messages.create(
+    call_kwargs = dict(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": content}],
     )
+    try:
+        message = await client.messages.create(**call_kwargs)
+    except _RETRYABLE as exc:
+        logger.warning("analyze_issue: retryable error on first attempt: %s", exc)
+        try:
+            message = await client.messages.create(**call_kwargs)
+        except Exception as exc2:
+            logger.error("analyze_issue: retry also failed: %s", exc2)
+            raise HTTPException(status_code=503, detail=f"AI service unavailable: {exc2}") from exc2
+    except anthropic.AuthenticationError as exc:
+        logger.error("analyze_issue: auth error: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service authentication failed") from exc
+    except Exception as exc:
+        logger.error("analyze_issue: unexpected error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"AI service error: {exc}") from exc
 
     try:
         block = message.content[0] if message.content else None
