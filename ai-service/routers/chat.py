@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 from typing import AsyncIterator
 
 import anthropic
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from reasoning import analyze_intent, build_reasoning_prompt, validate_response
 from routers.knowledge import _cosine_sim, _get_embedding_model, _kb_lock, kb_chunks, kb_documents
+from routers.mock_tickets import _TICKETS
 from tools import TOOLS, execute_tool
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,9 @@ _BASE = pathlib.Path(__file__).parent.parent
 with open(_BASE / "prompts.yaml") as f:
     _prompts_config = yaml.safe_load(f)
 TEMPLATES: dict[str, str] = _prompts_config["templates"]
+_ANALYSIS_PROMPT: str = _prompts_config["issue_analyzer"]
+
+_TICKET_ID_RE = re.compile(r'\b(\d{3,6})\b')
 
 sessions: dict[str, list[dict]] = {}
 session_locks: dict[str, asyncio.Lock] = {}
@@ -98,6 +103,47 @@ def _serialize_content_block(block) -> dict:
     if block.type == "tool_use":
         return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
     return {"type": block.type}
+
+
+def _resolve_description(text: str) -> tuple[str, str | None]:
+    """Return (content_to_analyze, ticket_id_or_None).
+
+    If the input contains a numeric ticket ID that exists in _TICKETS, return the
+    formatted ticket details; otherwise return the raw text unchanged.
+    """
+    match = _TICKET_ID_RE.search(text)
+    if match:
+        ticket_id = match.group(1)
+        ticket = _TICKETS.get(ticket_id)
+        if ticket:
+            parts = [
+                f"Title: {ticket['title']}",
+                f"Status: {ticket['status']}",
+                f"Priority: {ticket['priority']}",
+                f"Description: {ticket['description']}",
+            ]
+            if ticket.get("resolution"):
+                parts.append(f"Resolution: {ticket['resolution']}")
+            return "\n".join(parts), ticket_id
+    return text, None
+
+
+async def _run_analysis(user_content: str) -> dict:
+    """Call Claude with the issue_analyzer prompt; retries once on transient errors."""
+    call_kwargs = dict(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        system=_ANALYSIS_PROMPT,
+        messages=[{"role": "user", "content": user_content}],
+    )
+    try:
+        resp = await client.messages.create(**call_kwargs)
+    except _RETRYABLE:
+        resp = await client.messages.create(**call_kwargs)
+    raw = (getattr(resp.content[0], "text", "") or "").strip()
+    if raw.startswith("```"):
+        raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0].strip()
+    return json.loads(raw)
 
 
 async def _search_kb(query: str, history: list[dict] | None = None) -> list[dict]:
@@ -200,6 +246,35 @@ async def _stream_response(
         kb_results = await _search_kb(message, history=messages)
     source = "both" if kb_results else "general_ai"
     yield f"data: {json.dumps({'source': source})}\n\n"
+
+    # === Issue Analysis Path ===
+    if intent.is_issue_analysis:
+        content, ticket_id = _resolve_description(message)
+        if kb_results:
+            excerpts = "\n\n".join(
+                f"[Source: {kb_documents.get(c['doc_id'], {}).get('name', 'document')} | relevance: {c['score']:.2f}]\n{c['text']}"
+                for c in kb_results
+            )
+            user_content = f"<context>\n{excerpts}\n</context>\n\nIssue to analyze:\n{content}"
+        else:
+            user_content = content
+        try:
+            data = await _run_analysis(user_content)
+            result: dict = {k: data[k] for k in ("summary", "root_cause", "suggestion")}
+            if ticket_id:
+                result["ticket_id"] = ticket_id
+            yield f"data: {json.dumps({'analysis': result})}\n\n"
+            history_entry = (
+                f"[Issue Analysis]\nSummary: {data['summary']}\n"
+                f"Root Cause: {data['root_cause']}\nSuggestion: {data['suggestion']}"
+            )
+            sessions[session_id].append({"role": "assistant", "content": history_entry})
+            logger.info("session=%s analysis complete ticket_id=%s", session_id, ticket_id)
+        except Exception as exc:
+            for chunk in _error_events(exc):
+                yield chunk
+        yield "data: [DONE]\n\n"
+        return
 
     # === Build System Prompt (KB context + chain-of-thought) ===
     system_prompt = base_system_prompt
