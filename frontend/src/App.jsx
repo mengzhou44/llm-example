@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import ChatInput from "./components/ChatInput";
-import IssueAnalyzer from "./components/IssueAnalyzer";
 import MessageList from "./components/MessageList";
 import Sidebar from "./components/Sidebar";
 
@@ -17,18 +16,12 @@ function getSessionId() {
 }
 
 export default function App() {
-  const [mode, setMode] = useState("chat");
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [template, setTemplate] = useState("helpful_assistant");
   const [streaming, setStreaming] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [kbError, setKbError] = useState("");
-  const [analyzeInput, setAnalyzeInput] = useState("");
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeResult, setAnalyzeResult] = useState(null);
-  const [analyzeError, setAnalyzeError] = useState("");
   const bottomRef = useRef(null);
   const sessionId = useRef(getSessionId());
   const fileInputRef = useRef(null);
@@ -63,7 +56,7 @@ export default function App() {
       const res = await fetch(`${BACKEND}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Auth-Token": AUTH_TOKEN },
-        body: JSON.stringify({ message: text, session_id: sessionId.current, template }),
+        body: JSON.stringify({ message: text, session_id: sessionId.current, template: "helpful_assistant" }),
       });
 
       if (!res.ok) {
@@ -117,6 +110,22 @@ export default function App() {
               next[next.length - 1] = { ...next[next.length - 1], source: data.source };
               return next;
             });
+          } else if (data.analysis) {
+            setMessages((prev) => {
+              const next = [...prev];
+              next[next.length - 1] = { ...next[next.length - 1], analysis: data.analysis, content: "" };
+              return next;
+            });
+          } else if (data.error) {
+            setMessages((prev) => {
+              const next = [...prev];
+              next[next.length - 1] = {
+                role: "assistant",
+                content: `Error: ${data.error.message}`,
+                isError: true,
+              };
+              return next;
+            });
           } else if (data.tool_call) {
             setMessages((prev) => {
               const next = [...prev];
@@ -151,32 +160,6 @@ export default function App() {
       });
     } finally {
       setStreaming(false);
-    }
-  }
-
-  async function analyzeIssue(e) {
-    e.preventDefault();
-    const text = analyzeInput.trim();
-    if (!text || analyzing) return;
-    setAnalyzing(true);
-    setAnalyzeResult(null);
-    setAnalyzeError("");
-    try {
-      const res = await fetch(`${BACKEND}/analyze/issue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Auth-Token": AUTH_TOKEN },
-        body: JSON.stringify({ description: text }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setAnalyzeError(data.detail || "Analysis failed");
-        return;
-      }
-      setAnalyzeResult(data);
-    } catch {
-      setAnalyzeError("Network error");
-    } finally {
-      setAnalyzing(false);
     }
   }
 
@@ -245,10 +228,6 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
       <Sidebar
-        mode={mode}
-        setMode={setMode}
-        template={template}
-        setTemplate={setTemplate}
         streaming={streaming}
         documents={documents}
         uploading={uploading}
@@ -260,32 +239,19 @@ export default function App() {
       />
 
       <main className="flex flex-1 flex-col min-w-0">
-        {mode === "chat" ? (
-          <>
-            <MessageList
-              messages={messages}
-              streaming={streaming}
-              bottomRef={bottomRef}
-              onSelectPrompt={handleSelectPrompt}
-            />
-            <ChatInput
-              input={input}
-              setInput={setInput}
-              onSubmit={sendMessage}
-              streaming={streaming}
-              textareaRef={textareaRef}
-            />
-          </>
-        ) : (
-          <IssueAnalyzer
-            analyzeInput={analyzeInput}
-            setAnalyzeInput={setAnalyzeInput}
-            analyzing={analyzing}
-            analyzeResult={analyzeResult}
-            analyzeError={analyzeError}
-            onSubmit={analyzeIssue}
-          />
-        )}
+        <MessageList
+          messages={messages}
+          streaming={streaming}
+          bottomRef={bottomRef}
+          onSelectPrompt={handleSelectPrompt}
+        />
+        <ChatInput
+          input={input}
+          setInput={setInput}
+          onSubmit={sendMessage}
+          streaming={streaming}
+          textareaRef={textareaRef}
+        />
 
         <footer className="text-center text-xs text-gray-400 py-2 bg-white border-t border-gray-100">
           Easy Express Solutions Inc. &copy; 2026

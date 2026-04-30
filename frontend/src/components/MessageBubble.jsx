@@ -1,6 +1,29 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+function AnalysisCard({ analysis: a }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-w-full">
+      {a.ticket_id && (
+        <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-widest text-gray-400">Ticket</span>
+          <span className="text-[12px] font-medium text-gray-600">#{a.ticket_id}</span>
+        </div>
+      )}
+      {[
+        { label: "Summary", value: a.summary },
+        { label: "Root Cause", value: a.root_cause },
+        { label: "Suggestion", value: a.suggestion },
+      ].map(({ label, value }, i, arr) => (
+        <div key={label} className={`px-5 py-4 ${i < arr.length - 1 ? "border-b border-gray-100" : ""}`}>
+          <p className="text-[11px] uppercase tracking-widest text-gray-400 mb-1">{label}</p>
+          <p className="text-[15px] text-gray-700 leading-relaxed">{value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatToolCall(tc, done) {
   const verb = (active, past) => done ? past : active;
   if (tc.name === "get_support_ticket")
@@ -17,7 +40,7 @@ function formatToolCall(tc, done) {
 function formatStep(step) {
   if (step === "analyzing") return "Analyzing intent…";
   if (step === "validating") return "Validating response…";
-  if (step === "retrying") return "Retrying…";
+  if (step === "retrying" || step === "retrying_api") return "Retrying…";
   return step;
 }
 
@@ -47,6 +70,8 @@ export default function MessageBubble({ msg, isStreaming }) {
         <div className="max-w-full bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-[15px] text-red-600 leading-relaxed">
           {msg.content}
         </div>
+      ) : msg.analysis ? (
+        <AnalysisCard analysis={msg.analysis} />
       ) : (
         <div className="markdown-body max-w-full">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>

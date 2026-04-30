@@ -11,6 +11,8 @@ _INTENT_SYSTEM = (
     '- "complexity": "high" if the question requires deep multi-step reasoning, analysis, or synthesis; '
     '"low" for straightforward factual or conversational questions\n'
     '- "topic": a 2-5 word summary of what the question is about\n'
+    '- "is_issue_analysis": true if the message is asking to diagnose, analyze, or summarize a problem, '
+    "error, bug, support ticket, or incident description; false otherwise\n"
     "Return only raw JSON, no markdown fences, no extra text."
 )
 
@@ -25,6 +27,7 @@ class IntentResult:
     requires_kb: bool
     complexity: Literal["low", "high"]
     topic: str
+    is_issue_analysis: bool = False
 
 
 def _content_to_str(content) -> str:
@@ -69,9 +72,10 @@ async def analyze_intent(
             requires_kb=bool(data.get("requires_kb", False)),
             complexity="high" if data.get("complexity") == "high" else "low",
             topic=str(data.get("topic", "")),
+            is_issue_analysis=bool(data.get("is_issue_analysis", False)),
         )
     except Exception:
-        return IntentResult(requires_kb=True, complexity="low", topic="")
+        return IntentResult(requires_kb=True, complexity="low", topic="", is_issue_analysis=False)
 
 
 def validate_response(

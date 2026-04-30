@@ -13,7 +13,7 @@ export default function KnowledgeBase({ documents, uploading, kbError, onUpload,
 
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-[11px] uppercase tracking-widest text-gray-400">Knowledge Base</label>
+      <label className="text-[11px] uppercase tracking-widest text-gray-400">Issue Documents</label>
 
       <input
         type="file"
@@ -73,7 +73,7 @@ export default function KnowledgeBase({ documents, uploading, kbError, onUpload,
           ))}
         </div>
       ) : (
-        <p className="text-xs text-gray-400">No documents uploaded</p>
+        <p className="text-xs text-gray-400">No documents uploaded yet</p>
       )}
     </div>
   );
