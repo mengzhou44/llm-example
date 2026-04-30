@@ -3,6 +3,7 @@ import os
 import signal
 import sys
 import time
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from routers import chat, knowledge, mock_tickets  # noqa: E402 — must come after load_dotenv
+from routers.knowledge import preload_kb_from_disk  # noqa: E402
 
 # Structured logging: emit JSON-friendly lines that are easy to parse in log aggregators.
 logging.basicConfig(
@@ -28,7 +30,14 @@ def _handle_sigterm(signum, frame):
 
 signal.signal(signal.SIGTERM, _handle_sigterm)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await preload_kb_from_disk()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],

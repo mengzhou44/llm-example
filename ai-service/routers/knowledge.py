@@ -1,6 +1,8 @@
 import asyncio
 import io
+import logging
 import os
+import pathlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -12,9 +14,15 @@ from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = (".txt", ".md", ".pdf", ".docx")
+
+# Folder where uploaded documents are persisted so they survive restarts.
+KB_DOCS_DIR = pathlib.Path(__file__).parent.parent / "kb_docs"
+KB_DOCS_DIR.mkdir(parents=True, exist_ok=True)
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
@@ -92,6 +100,40 @@ async def _get_embedding_model() -> SentenceTransformer:
     return _embedding_model
 
 
+async def preload_kb_from_disk() -> None:
+    """Load all documents from KB_DOCS_DIR into memory on startup."""
+    files = sorted(
+        f for f in KB_DOCS_DIR.iterdir()
+        if f.is_file() and f.suffix in ALLOWED_EXTENSIONS
+    )
+    if not files:
+        return
+    logger.info("Preloading %d document(s) from %s", len(files), KB_DOCS_DIR)
+    for path in files:
+        try:
+            content = path.read_bytes()
+            text = _extract_text(path.name, content)
+            if not text.strip():
+                continue
+            chunks = _chunk_text(text)
+            model = await _get_embedding_model()
+            loop = asyncio.get_running_loop()
+            embeddings = await loop.run_in_executor(None, lambda: model.encode(chunks))
+            doc_id = str(uuid.uuid4())
+            uploaded_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+            async with _kb_lock:
+                for chunk_val, embedding in zip(chunks, embeddings):
+                    kb_chunks.append({"doc_id": doc_id, "text": chunk_val, "embedding": embedding})
+                kb_documents[doc_id] = {
+                    "name": path.name,
+                    "uploaded_at": uploaded_at,
+                    "chunk_count": len(chunks),
+                }
+            logger.info("Preloaded: %s (%d chunks)", path.name, len(chunks))
+        except Exception as exc:
+            logger.warning("Failed to preload %s: %s", path.name, exc)
+
+
 class DocumentResponse(BaseModel):
     id: str
     name: str
@@ -145,6 +187,8 @@ async def upload_document(file: UploadFile = File(...)):
             "chunk_count": len(chunks),
         }
 
+    (KB_DOCS_DIR / file.filename).write_bytes(content)
+
     return DocumentResponse(
         id=doc_id,
         name=file.filename,
@@ -165,8 +209,13 @@ async def delete_document(doc_id: str):
     async with _kb_lock:
         if doc_id not in kb_documents:
             raise HTTPException(status_code=404, detail="Document not found")
-        del kb_documents[doc_id]
+        doc_name = kb_documents.pop(doc_id)["name"]
         kb_chunks[:] = [c for c in kb_chunks if c["doc_id"] != doc_id]
+
+    disk_path = KB_DOCS_DIR / doc_name
+    if disk_path.exists():
+        disk_path.unlink()
+
     return {"ok": True}
 
 
